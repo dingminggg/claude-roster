@@ -29,16 +29,17 @@ def claude_flags(m: Member) -> list[str]:
     return flags
 
 
-def build_launch_command(m: Member) -> str:
-    """返回交给 `cmd /c` 的命令串:开一个带标题的新控制台,cd 到 cwd 后跑 claude。
-    `cmd /k` 让窗口在 claude 退出后仍留着(便于看输出 / 重开会话)。"""
-    title = window_title(m)
+def build_inner_command(m: Member) -> str:
+    """新控制台里要执行的命令:先 `title` 设窗口标题(供按标题查找),再 cd 到 cwd,
+    最后跑 claude。`cmd /k` 让窗口在 claude 退出后仍留着(便于看输出 / 重开会话)。"""
     flags = " ".join(claude_flags(m))
-    inner = f'cd /d "{m.cwd}" & claude {flags}'.rstrip()
-    return f'start "{title}" cmd /k {inner}'
+    return f'title {window_title(m)} & cd /d "{m.cwd}" & claude {flags}'.rstrip()
 
 
 def launch(m: Member) -> None:
-    """真正拉起控制台(独立窗口)。已存在同标题窗口由调用方先判重。"""
-    subprocess.Popen(["cmd", "/c", build_launch_command(m)],
-                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    """真正拉起控制台:用 CREATE_NEW_CONSOLE 让子进程自带一个新控制台窗口
+    (不走 `start`,避免嵌套引号被 cmd 拆坏)。已存在同标题窗口由调用方先判重。"""
+    subprocess.Popen(
+        f"cmd /k {build_inner_command(m)}",
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+    )

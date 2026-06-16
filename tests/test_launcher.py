@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from claude_cockpit.config import Member
-from claude_cockpit.launcher import build_launch_command, claude_flags, window_title
+from claude_cockpit.launcher import build_inner_command, claude_flags, window_title
 
 
 def _m(**kw):
@@ -29,10 +29,10 @@ def test_flags_default_no_model():
     assert "--model" not in f
 
 
-def test_build_command_contains_cwd_title_and_claude(tmp_path):
+def test_build_inner_command_contains_cwd_title_and_claude(tmp_path):
     m = _m(name="shop", cwd=tmp_path, permission_mode="default")
-    cmd = build_launch_command(m)
+    cmd = build_inner_command(m)
     assert "CCKPT:shop" in cmd
     assert str(tmp_path) in cmd
     assert "claude" in cmd
-    assert cmd.startswith("start ")  # 通过 cmd /c 执行
+    assert cmd.startswith("title ")  # 先设标题,供按标题查找
