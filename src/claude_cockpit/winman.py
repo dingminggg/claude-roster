@@ -1,0 +1,62 @@
+"""Win32(ctypes)窗口管理:按标题找控制台、置前、最小化。仅 Windows。
+所有失败吞掉——拿不到窗口不该让面板崩。"""
+from __future__ import annotations
+
+import ctypes
+from ctypes import wintypes
+
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+SW_RESTORE = 9
+SW_MINIMIZE = 6
+
+_EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+
+def find_by_title(needle: str) -> int | None:
+    """返回标题里包含 needle 的第一个可见窗口句柄;找不到返回 None。"""
+    found: list[int] = []
+
+    def cb(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        if needle in buf.value:
+            found.append(hwnd)
+            return False  # 停止枚举
+        return True
+
+    user32.EnumWindows(_EnumProc(cb), 0)
+    return found[0] if found else None
+
+
+def bring_to_front(hwnd: int) -> None:
+    """还原 + 置前。用 AttachThreadInput 绕过后台进程置前限制;失败退化为闪任务栏。"""
+    try:
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        fg = user32.GetForegroundWindow()
+        cur_tid = kernel32.GetCurrentThreadId()
+        target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+        fg_tid = user32.GetWindowThreadProcessId(fg, None)
+        for tid in {target_tid, fg_tid}:
+            if tid and tid != cur_tid:
+                user32.AttachThreadInput(cur_tid, tid, True)
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+        for tid in {target_tid, fg_tid}:
+            if tid and tid != cur_tid:
+                user32.AttachThreadInput(cur_tid, tid, False)
+    except Exception:
+        pass
+
+
+def minimize(hwnd: int) -> None:
+    try:
+        user32.ShowWindow(hwnd, SW_MINIMIZE)
+    except Exception:
+        pass
