@@ -1,7 +1,29 @@
 # claude-cockpit 成员清单。每个成员 = 一个真 claude 控制台窗口。
+# 字段:name / cwd / emoji / color / model(可选) / permission_mode
+#   permission_mode: default / acceptEdits / plan / bypassPermissions
 agents:
-  - name: demo
-    cwd: C:\Users\LQ\PhpstormProjects\claude-cockpit
+  - name: fad
+    cwd: C:\Users\LQ\PhpstormProjects\fad-backend
     emoji: "🏪"
-    color: "#2980b9"
+    color: "#e74c3c"
+    permission_mode: plan
+  - name: fad-2
+    cwd: C:\Users\LQ\PhpstormProjects\fad-backend-2
+    emoji: "📊"
+    color: "#72a89e"
     permission_mode: default
+  - name: fad-3
+    cwd: C:\Users\LQ\PhpstormProjects\fad-backend-3
+    emoji: "🏬"
+    color: "#93aba6"
+    permission_mode: default
+  - name: driver
+    cwd: C:\Users\LQ\PhpstormProjects\foodsup-driver
+    emoji: "🚚"
+    color: "#2ecc71"
+    permission_mode: acceptEdits
+  - name: foodsup-client
+    cwd: C:\Users\LQ\PhpstormProjects\foodsup-client
+    emoji: "🙋"
+    color: "#609ceb"
+    permission_mode: plan
