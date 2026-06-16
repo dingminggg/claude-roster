@@ -58,10 +58,14 @@ def main() -> int:
         else:
             start_member(m)                 # 没开/已被关:开一个
 
+    # 一次起多个 claude 会挤崩共享的后台服务、把所有会话一起带走(团灭)。
+    # 实测:逐个、间隔 ~5 秒启动则安全。所以「全部启动」用 QTimer 错开,绝不齐发。
+    LAUNCH_GAP_MS = 5000
+
     def launch_all() -> None:
-        for m in members:
-            if _live_hwnd(m.name) is None:
-                start_member(m)
+        todo = [m for m in members if _live_hwnd(m.name) is None]
+        for i, m in enumerate(todo):
+            QTimer.singleShot(i * LAUNCH_GAP_MS, lambda m=m: start_member(m))
 
     panel.member_clicked.connect(focus_member)
     panel.launch_all_clicked.connect(launch_all)
