@@ -29,11 +29,18 @@ class Panel(QWidget):
         for m in members:
             row = QHBoxLayout()
             dot = QLabel(_DOT["idle"])
+            start = QPushButton("▶")
+            start.setToolTip("单独启动 / 置前这一个")
+            start.setFixedWidth(28)
+            start.clicked.connect(
+                lambda _=False, n=m.name: self.member_clicked.emit(n))
             name = QPushButton(f"{m.emoji} @{m.name}")
             name.setFlat(True)
+            name.setToolTip("点击置前其控制台(没开则启动)")
             name.clicked.connect(
                 lambda _=False, n=m.name: self.member_clicked.emit(n))
             row.addWidget(dot)
+            row.addWidget(start)
             row.addWidget(name, 1)
             root.addLayout(row)
             self._rows[m.name] = dot
