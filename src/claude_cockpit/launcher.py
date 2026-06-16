@@ -19,7 +19,9 @@ def window_title(m: Member) -> str:
 
 
 def claude_flags(m: Member) -> list[str]:
-    flags: list[str] = []
+    # 始终带 --resume:控制台起来后弹历史对话列表让你选,接上之前的会话
+    # (不带的话每次都是空白新会话)。
+    flags: list[str] = ["--resume"]
     if m.model:
         flags += ["--model", m.model]
     if m.permission_mode == "bypassPermissions":

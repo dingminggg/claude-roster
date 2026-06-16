@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import time
 from ctypes import wintypes
 
 user32 = ctypes.windll.user32
@@ -33,6 +34,26 @@ def find_by_title(needle: str) -> int | None:
 
     user32.EnumWindows(_EnumProc(cb), 0)
     return found[0] if found else None
+
+
+def is_window(hwnd: int) -> bool:
+    """句柄是否仍指向一个存在的窗口(用户关掉控制台后即失效)。"""
+    try:
+        return bool(user32.IsWindow(hwnd))
+    except Exception:
+        return False
+
+
+def wait_for_title(needle: str, timeout: float = 3.0, interval: float = 0.1) -> int | None:
+    """启动控制台后,趁 claude 还没改标题,按标题轮询抓到窗口句柄;超时返回 None。"""
+    end = time.time() + timeout
+    while True:
+        h = find_by_title(needle)
+        if h:
+            return h
+        if time.time() >= end:
+            return None
+        time.sleep(interval)
 
 
 def bring_to_front(hwnd: int) -> None:

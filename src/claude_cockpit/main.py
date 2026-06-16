@@ -34,21 +34,34 @@ def main() -> int:
     panel = Panel(members)
     controller = Controller([m.name for m in members])
     by_name = {m.name: m for m in members}
+    hwnds: dict[str, int] = {}              # name -> 控制台窗口句柄(启动时抓,标题被 claude 改也不怕)
+
+    def _live_hwnd(name: str) -> int | None:
+        h = hwnds.get(name)
+        return h if (h and winman.is_window(h)) else None
+
+    def start_member(m) -> None:
+        """启动一个成员的控制台,并趁 claude 还没改标题抓住窗口句柄缓存起来。"""
+        launch(m)
+        h = winman.wait_for_title(window_title(m))
+        if h:
+            hwnds[m.name] = h
+            winman.bring_to_front(h)
 
     def focus_member(name: str) -> None:
         m = by_name.get(name)
         if not m:
             return
-        h = winman.find_by_title(window_title(m))
-        if h is None:
-            launch(m)                       # 没开就开
+        h = _live_hwnd(name)
+        if h is not None:
+            winman.bring_to_front(h)        # 已开:用缓存句柄置前(不受标题变化影响)
         else:
-            winman.bring_to_front(h)
+            start_member(m)                 # 没开/已被关:开一个
 
     def launch_all() -> None:
         for m in members:
-            if winman.find_by_title(window_title(m)) is None:
-                launch(m)
+            if _live_hwnd(m.name) is None:
+                start_member(m)
 
     panel.member_clicked.connect(focus_member)
     panel.launch_all_clicked.connect(launch_all)
