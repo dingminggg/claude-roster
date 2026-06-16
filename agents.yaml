@@ -1,0 +1,7 @@
+# claude-cockpit 成员清单。每个成员 = 一个真 claude 控制台窗口。
+agents:
+  - name: demo
+    cwd: C:\Users\LQ\PhpstormProjects\claude-cockpit
+    emoji: "🏪"
+    color: "#2980b9"
+    permission_mode: default

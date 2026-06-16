@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-cockpit"
+dynamic = ["version"]
+description = "Windows 原生面板:调度多个真 claude 控制台,按 CC hook 信号自动置前"
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6.6", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.dynamic]
+version = {attr = "claude_cockpit.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+claude-cockpit = "claude_cockpit.main:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
