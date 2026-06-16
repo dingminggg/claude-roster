@@ -13,10 +13,10 @@ def test_window_title():
     assert window_title(_m(name="driver")) == "CCKPT:driver"
 
 
-def test_flags_always_resume():
-    # 任何成员都带 --resume(起来后选历史对话接上)
-    assert "--resume" in claude_flags(_m(permission_mode="default"))
-    assert "--resume" in claude_flags(_m(permission_mode="bypassPermissions"))
+def test_flags_no_auto_resume():
+    # 启动不自动 --resume(自动 resume 会抢走/关闭已开着的会话窗口)
+    assert "--resume" not in claude_flags(_m(permission_mode="default"))
+    assert "--resume" not in claude_flags(_m(permission_mode="bypassPermissions"))
 
 
 def test_flags_bypass():
