@@ -75,8 +75,13 @@ def main() -> int:
         to_raise = controller.update(pending)
         for m in members:
             panel.set_status(m.name, controller.status(m.name))
-        for name in to_raise:               # 新出现的等待 → 自动置前
-            focus_member(name)
+        # 自动弹窗:只置前「cockpit 启动且句柄还在」的窗口,绝不新开。
+        # (pending 按 cwd 匹配,可能命中你手动开的同目录 claude;那种 cockpit 没句柄,
+        #  此时若走 start_member 就会重复开一个空白窗口——正是这个 bug。)
+        for name in to_raise:
+            h = _live_hwnd(name)
+            if h is not None:
+                winman.bring_to_front(h)
 
     timer = QTimer()
     timer.timeout.connect(tick)
