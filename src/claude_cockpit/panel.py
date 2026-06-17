@@ -39,6 +39,7 @@ QPushButton#go {
     font-size:12px; font-weight:700; padding:0;
 }
 QPushButton#go:hover { background:#414857; color:#ffffff; }
+QPushButton#go:disabled { background:#262a33; color:#565c67; }
 """
 
 
@@ -74,6 +75,7 @@ class Panel(QWidget):
         self.setMinimumWidth(248)
 
         self._dots: dict[str, QLabel] = {}
+        self._gos: dict[str, QPushButton] = {}   # name -> ▶ 按钮(运行中时屏蔽)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 14)
@@ -132,10 +134,20 @@ class Panel(QWidget):
             go.setToolTip("单独启动 / 置前这一个")
             go.clicked.connect(lambda _=False, n=m.name: self.member_clicked.emit(n))
             lay.addWidget(go, 0, Qt.AlignmentFlag.AlignVCenter)
+            self._gos[m.name] = go
 
             root.addWidget(card)
 
         root.addStretch(1)
+
+    def set_running(self, name: str, running: bool) -> None:
+        """运行中(cockpit 已启动且窗口还在)→ 屏蔽 ▶ 启动键(点卡片置前即可);
+        窗口关掉后恢复可启动。"""
+        go = self._gos.get(name)
+        if go is not None:
+            go.setEnabled(not running)
+            go.setToolTip("已在运行 · 点这张卡置前" if running
+                          else "单独启动 / 置前这一个")
 
     def set_status(self, name: str, status: str) -> None:
         dot = self._dots.get(name)

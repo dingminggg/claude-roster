@@ -54,16 +54,9 @@ def main() -> int:
             return
         h = _live_hwnd(name)
         if h is not None:
-            winman.bring_to_front(h)        # 已开(cockpit 启动):用缓存句柄置前
-            return
-        if controller.status(name) == "pending":
-            # 没有 cockpit 句柄,但有待确认信号 → 该目录已有 claude 在跑(很可能你手动开的)。
-            # 别再开一个重复的;cockpit 管不到那个窗口,提示你自己切过去。
-            tray.showMessage("Claude 驾驶舱",
-                             f"@{name} 已有运行中的会话(未重复启动),请手动切到它的窗口。",
-                             QSystemTrayIcon.MessageIcon.Information, 4000)
-            return
-        start_member(m)                     # 确实没开 → 开一个
+            winman.bring_to_front(h)        # cockpit 启动且窗口还在 → 用缓存句柄置前
+        else:
+            start_member(m)                 # cockpit 没启动过(或窗口已关)→ 开一个
 
     # 一次起多个 claude 会挤崩共享的后台服务、把所有会话一起带走(团灭)。
     # 实测:逐个、间隔 ~5 秒启动则安全。所以「全部启动」用 QTimer 错开,绝不齐发。
@@ -82,6 +75,8 @@ def main() -> int:
         to_raise = controller.update(pending)
         for m in members:
             panel.set_status(m.name, controller.status(m.name))
+            # 运行中(cockpit 启动且窗口还在)→ 屏蔽其 ▶ 启动键;窗口关掉则恢复
+            panel.set_running(m.name, _live_hwnd(m.name) is not None)
         # 自动弹窗:只置前「cockpit 启动且句柄还在」的窗口,绝不新开。
         # (pending 按 cwd 匹配,可能命中你手动开的同目录 claude;那种 cockpit 没句柄,
         #  此时若走 start_member 就会重复开一个空白窗口——正是这个 bug。)
