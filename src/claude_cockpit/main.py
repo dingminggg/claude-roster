@@ -128,24 +128,28 @@ def main() -> int:
         if done:
             _refresh_states()
 
-    def focus_member(name: str) -> None:
-        m = by_name.get(name)
-        if not m or name in launching:      # 启动中别重复开
-            return
+    def on_row_click(name: str) -> None:
+        """点成员横条:仅在「已运行」时把窗口置前;未运行/启动中一律无反应,
+        从根上杜绝误点横条把控制台开起来。"""
         h = _live_hwnd(name)
         if h is not None:
-            winman.bring_to_front(h)        # 已运行 → 直接置前(无害,不打扰)
+            winman.bring_to_front(h)
+
+    def on_start(name: str) -> None:
+        """点「启动」键:确认后拉起控制台(已运行/启动中忽略)。
+        没有「全部启动」:只能单个启动,从源头杜绝齐发挤崩 daemon 的团灭。"""
+        m = by_name.get(name)
+        if not m or name in launching or _live_hwnd(name) is not None:
             return
-        # 启动会拉起一个新控制台,是误点高发动作 → 先确认一步
         if QMessageBox.question(
                 panel, "启动成员", f"启动 @{name} 的 Claude 控制台?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
-        start_member(m)                     # cockpit 没启动过(或窗口已关)→ 开一个
+        start_member(m)
 
-    # 没有「全部启动」:只能单个启动(用户按节奏点),从源头杜绝齐发挤崩 daemon 的团灭。
-    panel.member_clicked.connect(focus_member)
+    panel.member_clicked.connect(on_row_click)
+    panel.start_requested.connect(on_start)
 
     def _persist_and_rebuild() -> None:
         nonlocal last_order

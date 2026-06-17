@@ -77,7 +77,9 @@ class _Card(QFrame):
     def __init__(self):
         super().__init__()
         self.setObjectName("card")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 默认不是手型:未运行时整条点了也没反应(只有「启动」键能开)。
+        # 运行后由 set_run_state 切成手型,表示「点横条可置前」。
+        self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -114,7 +116,8 @@ class _AddCard(QFrame):
 
 
 class Panel(QWidget):
-    member_clicked = Signal(str)
+    member_clicked = Signal(str)    # 点整条横条:仅运行后置前
+    start_requested = Signal(str)   # 点「启动」键:拉起控制台
     add_requested = Signal()
     edit_requested = Signal(str)
     delete_requested = Signal(str)
@@ -143,7 +146,7 @@ class Panel(QWidget):
         titles.setSpacing(1)
         t = QLabel("Claude 驾驶舱")
         t.setObjectName("title")
-        sub = QLabel("左键置前 · 右键编辑/删除 · 🟡 等你确认")
+        sub = QLabel("点「启动」开 · 运行后点横条置前 · 右键编辑/删除")
         sub.setObjectName("subtitle")
         titles.addWidget(t)
         titles.addWidget(sub)
@@ -190,8 +193,8 @@ class Panel(QWidget):
         go.setObjectName("go")
         go.setFixedSize(_GO_W, _GO_H)
         go.setCursor(Qt.CursorShape.PointingHandCursor)
-        go.setToolTip("单独启动 / 置前这一个")
-        go.clicked.connect(lambda _=False, n=m.name: self.member_clicked.emit(n))
+        go.setToolTip("启动这个成员的控制台")
+        go.clicked.connect(lambda _=False, n=m.name: self.start_requested.emit(n))
         lay.addWidget(go, 0, Qt.AlignmentFlag.AlignVCenter)
         self._gos[m.name] = go
 
@@ -237,6 +240,10 @@ class Panel(QWidget):
         eff = self._effects.get(name)
         if eff is not None:
             eff.setOpacity(_DIM if state == "down" else 1.0)
+        card = self._cards.get(name)
+        if card is not None:                    # 运行后横条才是手型 + 可点置前
+            card.setCursor(Qt.CursorShape.PointingHandCursor if state == "running"
+                           else Qt.CursorShape.ArrowCursor)
         go = self._gos.get(name)
         if go is None:
             return
