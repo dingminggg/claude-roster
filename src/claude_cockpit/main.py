@@ -8,11 +8,11 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QApplication, QMenu, QSystemTrayIcon,
+    QApplication, QMenu, QMessageBox, QSystemTrayIcon,
 )
 
-from . import cc_signals, store, winman
-from .config import load_config
+from . import cc_signals, dialogs, store, winman
+from .config import Member, load_config, save_config, validate_member
 from .controller import Controller
 from .launcher import launch, window_title
 from .matching import match_pending
@@ -38,7 +38,8 @@ def main() -> int:
     except Exception:
         pass
 
-    members = load_config(_config_path())
+    cfg_path = _config_path()
+    members = load_config(cfg_path)
     panel = Panel(members)
     controller = Controller([m.name for m in members])
     by_name = {m.name: m for m in members}
@@ -74,6 +75,69 @@ def main() -> int:
 
     # 没有「全部启动」:只能单个启动(用户按节奏点),从源头杜绝齐发挤崩 daemon 的团灭。
     panel.member_clicked.connect(focus_member)
+
+    def _persist_and_rebuild() -> None:
+        try:
+            save_config(cfg_path, members)
+        except Exception as e:
+            QMessageBox.warning(panel, "写回 agents.yaml 失败", str(e))
+        controller.set_members([m.name for m in members])
+        panel.rebuild(members)
+
+    def on_add() -> None:
+        data = dialogs.member_dialog(panel)
+        if not data:
+            return
+        try:
+            m = Member(name=data["name"], cwd=Path(data["cwd"]), emoji=data["emoji"],
+                       color=data["color"], model=data["model"],
+                       permission_mode=data["permission_mode"])
+            validate_member(m, existing_names=set(by_name))
+        except Exception as e:
+            QMessageBox.warning(panel, "添加失败", str(e))
+            return
+        members.append(m)
+        by_name[m.name] = m
+        _persist_and_rebuild()
+
+    def on_edit(name: str) -> None:
+        old = by_name.get(name)
+        if old is None:
+            return
+        data = dialogs.member_dialog(panel, member=old)
+        if not data:
+            return
+        try:
+            new = Member(name=name, cwd=Path(data["cwd"]), emoji=data["emoji"],
+                         color=data["color"], model=data["model"],
+                         permission_mode=data["permission_mode"])
+            validate_member(new)            # 名字没变,不查重名
+        except Exception as e:
+            QMessageBox.warning(panel, "保存失败", str(e))
+            return
+        members[members.index(old)] = new
+        by_name[name] = new
+        _persist_and_rebuild()
+
+    def on_delete(name: str) -> None:
+        if name not in by_name:
+            return
+        if len(members) <= 1:
+            QMessageBox.warning(panel, "无法删除", "至少要保留一个成员。")
+            return
+        if QMessageBox.question(panel, "删除成员",
+                                f"确定删除 @{name}?(只从面板移除,不动它的窗口/会话)") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        members[:] = [m for m in members if m.name != name]
+        by_name.pop(name, None)
+        if hwnds.pop(name, None) is not None:
+            store.save(hwnds)
+        _persist_and_rebuild()
+
+    panel.add_requested.connect(on_add)
+    panel.edit_requested.connect(on_edit)
+    panel.delete_requested.connect(on_delete)
 
     def tick() -> None:
         # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄

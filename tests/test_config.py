@@ -2,7 +2,7 @@ import textwrap
 
 import pytest
 
-from claude_cockpit.config import Member, load_config
+from claude_cockpit.config import Member, load_config, save_config
 
 
 def _write(tmp_path, text):
@@ -49,6 +49,21 @@ def test_missing_cwd_rejected(tmp_path):
     """)
     with pytest.raises(ValueError):
         load_config(p)
+
+
+def test_save_load_roundtrip(tmp_path):
+    members = [
+        Member(name="a", cwd=tmp_path, emoji="🏪", color="#111111",
+               permission_mode="plan"),
+        Member(name="b", cwd=tmp_path, model="opus"),
+    ]
+    p = tmp_path / "agents.yaml"
+    save_config(p, members)
+    loaded = load_config(p)
+    assert [m.name for m in loaded] == ["a", "b"]
+    assert loaded[0].emoji == "🏪"
+    assert loaded[0].permission_mode == "plan"
+    assert loaded[1].model == "opus"
 
 
 def test_duplicate_names_rejected(tmp_path):
