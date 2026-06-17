@@ -49,6 +49,16 @@ QPushButton#go {
 }
 QPushButton#go:hover { background:#34965a; color:#ffffff; }
 QPushButton#go:disabled { background:#2a2e37; color:#7b828d; }
+QPushButton#yes {
+    color:#dff5e6; background:#2e7d46; border:none; border-radius:11px;
+    font-size:11px; font-weight:600;
+}
+QPushButton#yes:hover { background:#369152; color:#ffffff; }
+QPushButton#no {
+    color:#cdd2db; background:#3a3f4b; border:none; border-radius:11px;
+    font-size:11px; font-weight:600;
+}
+QPushButton#no:hover { background:#4a505e; color:#ffffff; }
 """
 
 # 运行键统一尺寸:三种状态同宽,右侧排成一条干净的竖列(不再忽大忽小)
@@ -136,6 +146,8 @@ class Panel(QWidget):
         self._gos: dict[str, QPushButton] = {}
         self._effects: dict[str, QGraphicsOpacityEffect] = {}
         self._cards: dict[str, _Card] = {}
+        self._confirm_boxes: dict[str, QWidget] = {}   # 内联「确定/取消」条
+        self._confirming: set[str] = set()             # 当前处于确认态的成员
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 14)
@@ -194,9 +206,30 @@ class Panel(QWidget):
         go.setFixedSize(_GO_W, _GO_H)
         go.setCursor(Qt.CursorShape.PointingHandCursor)
         go.setToolTip("启动这个成员的控制台")
-        go.clicked.connect(lambda _=False, n=m.name: self.start_requested.emit(n))
+        go.clicked.connect(lambda _=False, n=m.name: self._enter_confirm(n))
         lay.addWidget(go, 0, Qt.AlignmentFlag.AlignVCenter)
         self._gos[m.name] = go
+
+        # 内联确认条:点「启动」后原地替换成「确定/取消」,默认隐藏
+        box = QWidget()
+        bl = QHBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(4)
+        yes = QPushButton("确定")
+        yes.setObjectName("yes")
+        yes.setFixedSize(36, _GO_H)
+        yes.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes.clicked.connect(lambda _=False, n=m.name: self._confirm_yes(n))
+        no = QPushButton("取消")
+        no.setObjectName("no")
+        no.setFixedSize(36, _GO_H)
+        no.setCursor(Qt.CursorShape.PointingHandCursor)
+        no.clicked.connect(lambda _=False, n=m.name: self._confirm_no(n))
+        bl.addWidget(yes)
+        bl.addWidget(no)
+        box.setVisible(False)
+        lay.addWidget(box, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._confirm_boxes[m.name] = box
 
         # 默认未运行 → 整卡置灰;set_run_state 命中后再点亮
         eff = QGraphicsOpacityEffect(card)
@@ -219,6 +252,8 @@ class Panel(QWidget):
         self._gos.clear()
         self._effects.clear()
         self._cards.clear()
+        self._confirm_boxes.clear()
+        self._confirming.clear()
         for m in members:
             self._list.addWidget(self._make_card(m))
         self._list.addWidget(self._add_card)
@@ -234,18 +269,58 @@ class Panel(QWidget):
                 self._list.addWidget(card)
         self._list.addWidget(self._add_card)
 
+    def _enter_confirm(self, name: str) -> None:
+        """点「启动」→ 原地把按钮换成「确定/取消」。"""
+        self._confirming.add(name)
+        go = self._gos.get(name)
+        box = self._confirm_boxes.get(name)
+        if go is not None:
+            go.setVisible(False)
+        if box is not None:
+            box.setVisible(True)
+        eff = self._effects.get(name)
+        if eff is not None:                     # 确认中点亮,确定/取消看得清
+            eff.setOpacity(1.0)
+
+    def _confirm_no(self, name: str) -> None:
+        """取消 → 回到「启动」按钮。"""
+        self._confirming.discard(name)
+        self.set_run_state(name, "down")
+
+    def _confirm_yes(self, name: str) -> None:
+        """确定 → 收起确认条,走启动流程。"""
+        self._confirming.discard(name)
+        box = self._confirm_boxes.get(name)
+        if box is not None:
+            box.setVisible(False)
+        go = self._gos.get(name)
+        if go is not None:
+            go.setVisible(True)
+        self.start_requested.emit(name)
+
     def set_run_state(self, name: str, state: str) -> None:
         """state ∈ {down(未运行), launching(启动中), running(运行中)}。
-        控制整卡明暗 + 右侧运行键的文字/样式。"""
-        eff = self._effects.get(name)
-        if eff is not None:
-            eff.setOpacity(_DIM if state == "down" else 1.0)
+        控制整卡明暗 + 右侧运行键的文字/样式;确认态优先(显示确定/取消)。"""
+        if state != "down":                     # 一旦进入启动/运行,确认态作废
+            self._confirming.discard(name)
+        confirming = name in self._confirming and state == "down"
+
+        box = self._confirm_boxes.get(name)
+        if box is not None:
+            box.setVisible(confirming)
         card = self._cards.get(name)
         if card is not None:                    # 运行后横条才是手型 + 可点置前
             card.setCursor(Qt.CursorShape.PointingHandCursor if state == "running"
                            else Qt.CursorShape.ArrowCursor)
+        eff = self._effects.get(name)
+        if eff is not None:                     # 确认中也点亮;纯未运行才置灰
+            eff.setOpacity(_DIM if (state == "down" and not confirming) else 1.0)
+
         go = self._gos.get(name)
         if go is None:
+            return
+        go.setVisible(not confirming)
+        if confirming:
             return
         # 尺寸三态统一(_GO_W×_GO_H),只换文字/配色,右侧始终对齐成一列
         if state == "running":
@@ -262,7 +337,7 @@ class Panel(QWidget):
             go.setEnabled(True)
             go.setText("启动")
             go.setStyleSheet("")                # 回退到 #go 默认样式
-            go.setToolTip("单独启动 / 置前这一个")
+            go.setToolTip("启动这个成员的控制台")
 
     def set_status(self, name: str, status: str) -> None:
         dot = self._dots.get(name)

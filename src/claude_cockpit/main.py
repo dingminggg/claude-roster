@@ -138,15 +138,11 @@ def main() -> int:
             winman.bring_to_front(h)
 
     def on_start(name: str) -> None:
-        """点「启动」键:确认后拉起控制台(已运行/启动中忽略)。
+        """面板里点「启动」→「确定」后发来:拉起控制台(已运行/启动中忽略)。
+        确认已在卡片内联完成(确定/取消),这里直接走启动。
         没有「全部启动」:只能单个启动,从源头杜绝齐发挤崩 daemon 的团灭。"""
         m = by_name.get(name)
         if not m or name in launching or _live_hwnd(name) is not None:
-            return
-        if QMessageBox.question(
-                panel, "启动成员", f"启动 @{name} 的 Claude 控制台?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         start_member(m)
 
