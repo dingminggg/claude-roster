@@ -12,7 +12,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget,
+    QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QVBoxLayout, QWidget,
 )
 
 # 图标:claude-groupchat 的「多只小青蛙」图,已复制进本包 assets
@@ -45,6 +46,12 @@ QPushButton#go {
 QPushButton#go:hover { background:#414857; color:#ffffff; }
 QPushButton#go:disabled { background:#262a33; color:#565c67; }
 """
+
+# 未运行的卡片整张置灰(半透明),运行中恢复全亮
+_DIM = 0.4
+# 运行中的「运行中」徽标:绿底绿字,一眼可辨
+_RUNNING_QSS = ("color:#9be6b4; background:#1f3a29; border:none;"
+                " border-radius:6px; font-size:11px; font-weight:700;")
 
 
 def _dot_qss(color: str) -> str:
@@ -92,6 +99,7 @@ class Panel(QWidget):
 
         self._dots: dict[str, QLabel] = {}
         self._gos: dict[str, QPushButton] = {}
+        self._effects: dict[str, QGraphicsOpacityEffect] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 14)
@@ -160,6 +168,12 @@ class Panel(QWidget):
         go.clicked.connect(lambda _=False, n=m.name: self.member_clicked.emit(n))
         lay.addWidget(go, 0, Qt.AlignmentFlag.AlignVCenter)
         self._gos[m.name] = go
+
+        # 默认未运行 → 整卡置灰;tick 里 set_running 命中后再点亮
+        eff = QGraphicsOpacityEffect(card)
+        eff.setOpacity(_DIM)
+        card.setGraphicsEffect(eff)
+        self._effects[m.name] = eff
         return card
 
     def rebuild(self, members) -> None:
@@ -172,16 +186,29 @@ class Panel(QWidget):
                 w.deleteLater()
         self._dots.clear()
         self._gos.clear()
+        self._effects.clear()
         for m in members:
             self._cards.addWidget(self._make_card(m))
 
     def set_running(self, name: str, running: bool) -> None:
-        """运行中 → 屏蔽 ▶ 启动键(点卡片置前即可);窗口关掉后恢复。"""
+        """运行中 → 整卡点亮 + ▶ 换成「运行中」徽标(点卡片置前即可);
+        窗口关掉后 → 整卡置灰 + 恢复 ▶ 可启动。"""
+        eff = self._effects.get(name)
+        if eff is not None:
+            eff.setOpacity(1.0 if running else _DIM)
         go = self._gos.get(name)
         if go is not None:
             go.setEnabled(not running)
-            go.setToolTip("已在运行 · 点这张卡置前" if running
-                          else "单独启动 / 置前这一个")
+            if running:
+                go.setText("运行中")
+                go.setFixedSize(52, 26)
+                go.setStyleSheet(_RUNNING_QSS)
+                go.setToolTip("已在运行 · 点这张卡置前")
+            else:
+                go.setText("▶")
+                go.setFixedSize(26, 26)
+                go.setStyleSheet("")          # 回退到 #go 默认样式
+                go.setToolTip("单独启动 / 置前这一个")
 
     def set_status(self, name: str, status: str) -> None:
         dot = self._dots.get(name)
