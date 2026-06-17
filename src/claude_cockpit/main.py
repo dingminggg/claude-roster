@@ -54,9 +54,16 @@ def main() -> int:
             return
         h = _live_hwnd(name)
         if h is not None:
-            winman.bring_to_front(h)        # 已开:用缓存句柄置前(不受标题变化影响)
-        else:
-            start_member(m)                 # 没开/已被关:开一个
+            winman.bring_to_front(h)        # 已开(cockpit 启动):用缓存句柄置前
+            return
+        if controller.status(name) == "pending":
+            # 没有 cockpit 句柄,但有待确认信号 → 该目录已有 claude 在跑(很可能你手动开的)。
+            # 别再开一个重复的;cockpit 管不到那个窗口,提示你自己切过去。
+            tray.showMessage("Claude 驾驶舱",
+                             f"@{name} 已有运行中的会话(未重复启动),请手动切到它的窗口。",
+                             QSystemTrayIcon.MessageIcon.Information, 4000)
+            return
+        start_member(m)                     # 确实没开 → 开一个
 
     # 一次起多个 claude 会挤崩共享的后台服务、把所有会话一起带走(团灭)。
     # 实测:逐个、间隔 ~5 秒启动则安全。所以「全部启动」用 QTimer 错开,绝不齐发。
