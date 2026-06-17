@@ -69,6 +69,8 @@ def main() -> int:
     # 期间卡片显示「启动中」给反馈;窗口一抓到就转「运行中」。
     launching: dict[str, int] = {}
     last_order: list[str] = []
+    # 托盘闪烁:面板最小化/隐藏时,只要有成员等你确认就让托盘图标闪
+    blink_state = {"pending": False, "on": False}
 
     def _live_hwnd(name: str) -> int | None:
         h = hwnds.get(name)
@@ -225,6 +227,7 @@ def main() -> int:
                 hwnds.pop(n, None)
             store.save(hwnds)
         pending = match_pending(cc_signals.read_pending_full(), members)
+        blink_state["pending"] = bool(pending)
         to_raise = controller.update(pending)
         _refresh_states()                   # 明暗/运行键/状态灯 + 运行中靠前排序
         # 自动弹窗:只置前「cockpit 启动且句柄还在」的窗口,绝不新开。
@@ -244,25 +247,57 @@ def main() -> int:
     launch_timer.timeout.connect(_poll_launching)
     launch_timer.start(200)
 
+    def _restore_panel() -> None:
+        """从最小化/隐藏还原面板并置前。"""
+        panel.setWindowState(panel.windowState() & ~Qt.WindowState.WindowMinimized)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _panel_away() -> bool:
+        return panel.isHidden() or panel.isMinimized()
+
     # 托盘:显隐面板 / 退出(用多只小青蛙图标)
     tray = QSystemTrayIcon(icon, app)
     menu = QMenu()
     menu.addAction("显示/隐藏面板",
-                   lambda: panel.setVisible(not panel.isVisible()))
+                   lambda: panel.hide() if not _panel_away() else _restore_panel())
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)
     tray.setToolTip("Claude 驾驶舱")
+    # 左键/双击托盘图标 → 还原面板(尤其方便点掉正在闪的提醒)
+    tray.activated.connect(
+        lambda r: _restore_panel()
+        if r in (QSystemTrayIcon.ActivationReason.Trigger,
+                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
     tray.show()
+
+    # 闪烁:面板不在眼前(最小化/隐藏)且有人 pending → 托盘图标在 图标/空 间交替。
+    # 一直跑的轻量定时器:不需要闪时就把图标复位,需要时才交替。
+    _empty_icon = QIcon()
+
+    def _blink_tick() -> None:
+        want = blink_state["pending"] and _panel_away()
+        if not want:
+            if blink_state["on"]:
+                blink_state["on"] = False
+            tray.setIcon(icon)
+            tray.setToolTip("Claude 驾驶舱")
+            return
+        blink_state["on"] = not blink_state["on"]
+        tray.setIcon(_empty_icon if blink_state["on"] else icon)
+        tray.setToolTip("有成员在等你确认 · 点我打开")
+
+    blink_timer = QTimer()
+    blink_timer.timeout.connect(_blink_tick)
+    blink_timer.start(550)
 
     # 单实例服务端:后续实例连进来 → 把本面板弹到前台
     def _raise_panel() -> None:
         conn = server.nextPendingConnection()
         if conn is not None:
             conn.close()
-        panel.setWindowState(panel.windowState() & ~Qt.WindowState.WindowMinimized)
-        panel.show()
-        panel.raise_()
-        panel.activateWindow()
+        _restore_panel()
 
     QLocalServer.removeServer(_SINGLE_KEY)   # 清掉上次崩溃残留的名字
     server = QLocalServer(app)
