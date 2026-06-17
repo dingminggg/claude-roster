@@ -5,8 +5,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QMenu, QMessageBox, QSystemTrayIcon,
 )
@@ -26,9 +27,23 @@ def _config_path() -> Path:
     return p if p.exists() else Path("agents.yaml")
 
 
+_SINGLE_KEY = "claude-cockpit-single-instance"
+
+
 def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+
+    # 单实例:已有实例在跑 → 让它把面板弹到前台,自己退出。
+    probe = QLocalSocket()
+    probe.connectToServer(_SINGLE_KEY)
+    if probe.waitForConnected(300):
+        probe.write(b"show")
+        probe.flush()
+        probe.waitForBytesWritten(300)
+        probe.disconnectFromServer()
+        return 0
+    probe.abort()
 
     icon = QIcon(str(ICON_PATH)) if ICON_PATH.exists() else QIcon()
     app.setWindowIcon(icon)
@@ -173,6 +188,21 @@ def main() -> int:
     tray.setContextMenu(menu)
     tray.setToolTip("Claude 驾驶舱")
     tray.show()
+
+    # 单实例服务端:后续实例连进来 → 把本面板弹到前台
+    def _raise_panel() -> None:
+        conn = server.nextPendingConnection()
+        if conn is not None:
+            conn.close()
+        panel.setWindowState(panel.windowState() & ~Qt.WindowState.WindowMinimized)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    QLocalServer.removeServer(_SINGLE_KEY)   # 清掉上次崩溃残留的名字
+    server = QLocalServer(app)
+    server.listen(_SINGLE_KEY)
+    server.newConnection.connect(_raise_panel)
 
     panel.show()
     return app.exec()
