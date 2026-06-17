@@ -22,7 +22,7 @@ agents:
     emoji: "🚚"
     color: "#2ecc71"
     permission_mode: acceptEdits
-  - name: foodsup-client
+  - name: customer
     cwd: C:\Users\LQ\PhpstormProjects\foodsup-client
     emoji: "🙋"
     color: "#609ceb"

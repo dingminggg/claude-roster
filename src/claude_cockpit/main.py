@@ -134,9 +134,15 @@ def main() -> int:
             return
         h = _live_hwnd(name)
         if h is not None:
-            winman.bring_to_front(h)        # cockpit 启动且窗口还在 → 用缓存句柄置前
-        else:
-            start_member(m)                 # cockpit 没启动过(或窗口已关)→ 开一个
+            winman.bring_to_front(h)        # 已运行 → 直接置前(无害,不打扰)
+            return
+        # 启动会拉起一个新控制台,是误点高发动作 → 先确认一步
+        if QMessageBox.question(
+                panel, "启动成员", f"启动 @{name} 的 Claude 控制台?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        start_member(m)                     # cockpit 没启动过(或窗口已关)→ 开一个
 
     # 没有「全部启动」:只能单个启动(用户按节奏点),从源头杜绝齐发挤崩 daemon 的团灭。
     panel.member_clicked.connect(focus_member)
