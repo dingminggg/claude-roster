@@ -44,21 +44,24 @@ QFrame#addcard:hover QLabel#addtext { color:#9be6b4; }
 QLabel#name { font-size:13px; font-weight:600; background:transparent; }
 QLabel#dot { background:transparent; }
 QPushButton#go {
-    color:#cdd2db; background:#333845; border:none; border-radius:6px;
-    font-size:12px; font-weight:700; padding:0;
+    color:#c7ccd6; background:#2f343f; border:none; border-radius:11px;
+    font-size:11px; font-weight:600; padding:0;
 }
-QPushButton#go:hover { background:#414857; color:#ffffff; }
-QPushButton#go:disabled { background:#262a33; color:#565c67; }
+QPushButton#go:hover { background:#34965a; color:#ffffff; }
+QPushButton#go:disabled { background:#2a2e37; color:#7b828d; }
 """
+
+# 运行键统一尺寸:三种状态同宽,右侧排成一条干净的竖列(不再忽大忽小)
+_GO_W, _GO_H = 56, 22
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
-# 运行中的「运行中」徽标:绿底绿字,一眼可辨
+# 运行中:绿色胶囊
 _RUNNING_QSS = ("color:#9be6b4; background:#1f3a29; border:none;"
-                " border-radius:6px; font-size:11px; font-weight:700;")
-# 启动中的「启动中」徽标:琥珀底,提示正在拉起(中间这段以前没反馈)
+                " border-radius:11px; font-size:11px; font-weight:600;")
+# 启动中:琥珀胶囊(提示正在拉起,中间这段以前没反馈)
 _LAUNCHING_QSS = ("color:#f1c40f; background:#3a3320; border:none;"
-                  " border-radius:6px; font-size:11px; font-weight:700;")
+                  " border-radius:11px; font-size:11px; font-weight:600;")
 
 
 def _dot_qss(color: str) -> str:
@@ -183,9 +186,9 @@ class Panel(QWidget):
         name.setStyleSheet(f"color:{m.color};")
         lay.addWidget(name, 1)
 
-        go = QPushButton("▶")
+        go = QPushButton("启动")
         go.setObjectName("go")
-        go.setFixedSize(26, 26)
+        go.setFixedSize(_GO_W, _GO_H)
         go.setCursor(Qt.CursorShape.PointingHandCursor)
         go.setToolTip("单独启动 / 置前这一个")
         go.clicked.connect(lambda _=False, n=m.name: self.member_clicked.emit(n))
@@ -237,22 +240,20 @@ class Panel(QWidget):
         go = self._gos.get(name)
         if go is None:
             return
+        # 尺寸三态统一(_GO_W×_GO_H),只换文字/配色,右侧始终对齐成一列
         if state == "running":
             go.setEnabled(False)
             go.setText("运行中")
-            go.setFixedSize(52, 26)
             go.setStyleSheet(_RUNNING_QSS)
             go.setToolTip("已在运行 · 点这张卡置前")
         elif state == "launching":
             go.setEnabled(False)
             go.setText("启动中")
-            go.setFixedSize(52, 26)
             go.setStyleSheet(_LAUNCHING_QSS)
             go.setToolTip("正在拉起控制台…")
         else:                                   # down
             go.setEnabled(True)
-            go.setText("▶")
-            go.setFixedSize(26, 26)
+            go.setText("启动")
             go.setStyleSheet("")                # 回退到 #go 默认样式
             go.setToolTip("单独启动 / 置前这一个")
 
