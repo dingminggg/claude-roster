@@ -44,6 +44,26 @@ def is_window(hwnd: int) -> bool:
         return False
 
 
+_CONSOLE_CLASSES = {
+    "ConsoleWindowClass",              # 经典 conhost
+    "CASCADIA_HOSTING_WINDOW_CLASS",   # Windows Terminal
+    "PseudoConsoleWindow",
+}
+
+
+def is_console_window(hwnd: int) -> bool:
+    """是不是控制台窗口。用于复用落盘句柄时的保险:句柄可能被无关窗口复用,
+    若窗口类明显不是控制台就拒绝。读不到类名则给予信任(返回 True)。"""
+    try:
+        buf = ctypes.create_unicode_buffer(128)
+        n = user32.GetClassNameW(hwnd, buf, 128)
+        if n <= 0:
+            return True
+        return buf.value in _CONSOLE_CLASSES
+    except Exception:
+        return True
+
+
 def wait_for_title(needle: str, timeout: float = 8.0, interval: float = 0.1) -> int | None:
     """启动控制台后按标题轮询抓窗口句柄。窗口一出现(零点几秒)就抓到;超时返回 None。
     超时给得很宽(默认 8s),配合启动命令里 ~3s 的标题停顿,抓取毫无时间压力。"""

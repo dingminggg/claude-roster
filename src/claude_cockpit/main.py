@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMenu, QSystemTrayIcon,
 )
 
-from . import cc_signals, winman
+from . import cc_signals, store, winman
 from .config import load_config
 from .controller import Controller
 from .launcher import launch, window_title
@@ -42,18 +42,24 @@ def main() -> int:
     panel = Panel(members)
     controller = Controller([m.name for m in members])
     by_name = {m.name: m for m in members}
-    hwnds: dict[str, int] = {}              # name -> 控制台窗口句柄(启动时抓,标题被 claude 改也不怕)
+    # name -> 控制台窗口句柄。落盘缓存:退出/重启 cockpit 后载回,凡是句柄仍指向
+    # 一个存活的控制台窗口就复用(置前 / 屏蔽 ▶),不必重开;失效的丢弃。
+    hwnds: dict[str, int] = {
+        n: h for n, h in store.load().items()
+        if n in by_name and winman.is_window(h) and winman.is_console_window(h)
+    }
 
     def _live_hwnd(name: str) -> int | None:
         h = hwnds.get(name)
         return h if (h and winman.is_window(h)) else None
 
     def start_member(m) -> None:
-        """启动一个成员的控制台,并趁 claude 还没改标题抓住窗口句柄缓存起来。"""
+        """启动一个成员的控制台,并趁 claude 还没改标题抓住窗口句柄缓存起来(并落盘)。"""
         launch(m)
         h = winman.wait_for_title(window_title(m))
         if h:
             hwnds[m.name] = h
+            store.save(hwnds)
             winman.bring_to_front(h)
 
     def focus_member(name: str) -> None:
@@ -70,6 +76,12 @@ def main() -> int:
     panel.member_clicked.connect(focus_member)
 
     def tick() -> None:
+        # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄
+        dead = [n for n, h in hwnds.items() if not winman.is_window(h)]
+        if dead:
+            for n in dead:
+                hwnds.pop(n, None)
+            store.save(hwnds)
         pending = match_pending(cc_signals.read_pending_full(), members)
         to_raise = controller.update(pending)
         for m in members:
