@@ -23,12 +23,6 @@ _QSS = """
 QWidget#panel { background:#181a1f; }
 QLabel#title { color:#eaecef; font-size:14px; font-weight:700; }
 QLabel#subtitle { color:#6e7682; font-size:11px; }
-QPushButton#launchAll {
-    background:#2d7d46; color:#ffffff; border:none; border-radius:8px;
-    padding:8px 12px; font-size:12px; font-weight:600;
-}
-QPushButton#launchAll:hover { background:#349652; }
-QPushButton#launchAll:pressed { background:#27703f; }
 QFrame#card { background:#22252d; border-radius:10px; }
 QFrame#card:hover { background:#2b2f3a; }
 QFrame#accent { border-radius:2px; }
@@ -64,7 +58,6 @@ def _dot_qss(color: str) -> str:
 
 class Panel(QWidget):
     member_clicked = Signal(str)
-    launch_all_clicked = Signal()
 
     def __init__(self, members):
         super().__init__()
@@ -81,24 +74,16 @@ class Panel(QWidget):
         root.setContentsMargins(14, 12, 14, 14)
         root.setSpacing(10)
 
-        # 头部:标题 + 副标题 + 全部启动
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        # 头部:标题 + 副标题
         titles = QVBoxLayout()
         titles.setSpacing(1)
         t = QLabel("Claude 驾驶舱")
         t.setObjectName("title")
-        sub = QLabel("点成员置前 · 🟡 等你确认")
+        sub = QLabel("点成员启动 / 置前 · 🟡 等你确认")
         sub.setObjectName("subtitle")
         titles.addWidget(t)
         titles.addWidget(sub)
-        header.addLayout(titles, 1)
-        btn_all = QPushButton("▶ 全部启动")
-        btn_all.setObjectName("launchAll")
-        btn_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_all.clicked.connect(self.launch_all_clicked.emit)
-        header.addWidget(btn_all, 0, Qt.AlignmentFlag.AlignTop)
-        root.addLayout(header)
+        root.addLayout(titles)
 
         # 成员卡片
         for m in members:

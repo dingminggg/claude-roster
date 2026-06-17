@@ -58,17 +58,8 @@ def main() -> int:
         else:
             start_member(m)                 # cockpit 没启动过(或窗口已关)→ 开一个
 
-    # 一次起多个 claude 会挤崩共享的后台服务、把所有会话一起带走(团灭)。
-    # 实测:逐个、间隔 ~5 秒启动则安全。所以「全部启动」用 QTimer 错开,绝不齐发。
-    LAUNCH_GAP_MS = 5000
-
-    def launch_all() -> None:
-        todo = [m for m in members if _live_hwnd(m.name) is None]
-        for i, m in enumerate(todo):
-            QTimer.singleShot(i * LAUNCH_GAP_MS, lambda m=m: start_member(m))
-
+    # 没有「全部启动」:只能单个启动(用户按节奏点),从源头杜绝齐发挤崩 daemon 的团灭。
     panel.member_clicked.connect(focus_member)
-    panel.launch_all_clicked.connect(launch_all)
 
     def tick() -> None:
         pending = match_pending(cc_signals.read_pending_full(), members)
