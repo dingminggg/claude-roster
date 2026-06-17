@@ -34,12 +34,13 @@ def claude_flags(m: Member) -> list[str]:
 
 def build_inner_command(m: Member) -> str:
     """新控制台里要执行的命令:先 `title` 设窗口标题(供按标题抓句柄),cd 到 cwd,
-    再停顿 ~1 秒让标题稳定存在(claude 启动后会改标题,必须趁这段时间抓到窗口句柄),
-    最后跑 claude。`cmd /k` 让窗口在 claude 退出后仍留着。"""
+    再停顿 ~3 秒让标题稳稳挂着,最后才跑 claude(claude 启动后会改标题)。
+    句柄在窗口刚出现那一刻就被抓走、缓存起来,之后改名都不影响;这 3 秒只是
+    给抓取留足富余,彻底避免「抢时间」。`cmd /k` 让窗口在 claude 退出后仍留着。"""
     flags = " ".join(claude_flags(m))
-    # ping 当延时(比 timeout 更不挑环境,不依赖 stdin):-n 2 ≈ 1 秒
+    # ping 当延时(比 timeout 更不挑环境,不依赖 stdin):-n 4 ≈ 3 秒
     return (f'title {window_title(m)} & cd /d "{m.cwd}" & '
-            f'ping -n 2 127.0.0.1 >nul & claude {flags}').rstrip()
+            f'ping -n 4 127.0.0.1 >nul & claude {flags}').rstrip()
 
 
 def launch(m: Member) -> None:

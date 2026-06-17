@@ -44,8 +44,9 @@ def is_window(hwnd: int) -> bool:
         return False
 
 
-def wait_for_title(needle: str, timeout: float = 3.0, interval: float = 0.1) -> int | None:
-    """启动控制台后,趁 claude 还没改标题,按标题轮询抓到窗口句柄;超时返回 None。"""
+def wait_for_title(needle: str, timeout: float = 8.0, interval: float = 0.1) -> int | None:
+    """启动控制台后按标题轮询抓窗口句柄。窗口一出现(零点几秒)就抓到;超时返回 None。
+    超时给得很宽(默认 8s),配合启动命令里 ~3s 的标题停顿,抓取毫无时间压力。"""
     end = time.time() + timeout
     while True:
         h = find_by_title(needle)
