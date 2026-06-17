@@ -65,22 +65,72 @@ def main() -> int:
         if n in by_name and winman.is_window(h) and winman.is_console_window(h)
     }
 
+    # 正在启动中的成员:name -> 已轮询次数。控制台从点击到出现有 ~3s 空窗,
+    # 期间卡片显示「启动中」给反馈;窗口一抓到就转「运行中」。
+    launching: dict[str, int] = {}
+    last_order: list[str] = []
+
     def _live_hwnd(name: str) -> int | None:
         h = hwnds.get(name)
         return h if (h and winman.is_window(h)) else None
 
+    def _state_of(name: str) -> str:
+        if _live_hwnd(name) is not None:
+            return "running"
+        if name in launching:
+            return "launching"
+        return "down"
+
+    _RANK = {"running": 0, "launching": 1, "down": 2}
+
+    def _refresh_states() -> None:
+        """刷新每张卡的明暗/运行键 + 状态灯,并把运行中/启动中的卡排到前面。"""
+        nonlocal last_order
+        pos = {m.name: i for i, m in enumerate(members)}
+        states = {m.name: _state_of(m.name) for m in members}
+        for m in members:
+            panel.set_run_state(m.name, states[m.name])
+            panel.set_status(m.name, controller.status(m.name))
+        order = sorted(states, key=lambda n: (_RANK[states[n]], pos[n]))
+        if order != last_order:
+            panel.set_order(order)
+            last_order = order
+
     def start_member(m) -> None:
-        """启动一个成员的控制台,并趁 claude 还没改标题抓住窗口句柄缓存起来(并落盘)。"""
+        """启动一个成员的控制台(不阻塞 UI):立刻标记「启动中」,
+        由 _poll_launching 轮询抓窗口句柄(趁 claude 改标题前),抓到再落盘并置前。"""
         launch(m)
-        h = winman.wait_for_title(window_title(m))
-        if h:
-            hwnds[m.name] = h
-            store.save(hwnds)
-            winman.bring_to_front(h)
+        launching[m.name] = 0
+        _refresh_states()                   # 立刻给「启动中」反馈
+
+    def _poll_launching() -> None:
+        """每 200ms:给启动中的成员抓窗口句柄;抓到→缓存+置前;超时→放弃。"""
+        if not launching:
+            return
+        done = []
+        for name in list(launching):
+            m = by_name.get(name)
+            if m is None:
+                done.append(name)
+                continue
+            h = winman.find_by_title(window_title(m))
+            if h:
+                hwnds[name] = h
+                store.save(hwnds)
+                winman.bring_to_front(h)
+                done.append(name)
+            else:
+                launching[name] += 1
+                if launching[name] > 40:    # ~8s 还没出现就放弃,卡片回到未运行
+                    done.append(name)
+        for name in done:
+            launching.pop(name, None)
+        if done:
+            _refresh_states()
 
     def focus_member(name: str) -> None:
         m = by_name.get(name)
-        if not m:
+        if not m or name in launching:      # 启动中别重复开
             return
         h = _live_hwnd(name)
         if h is not None:
@@ -92,12 +142,15 @@ def main() -> int:
     panel.member_clicked.connect(focus_member)
 
     def _persist_and_rebuild() -> None:
+        nonlocal last_order
         try:
             save_config(cfg_path, members)
         except Exception as e:
             QMessageBox.warning(panel, "写回 agents.yaml 失败", str(e))
         controller.set_members([m.name for m in members])
         panel.rebuild(members)
+        last_order = []                     # 强制重排(卡片已重建)
+        _refresh_states()
 
     def on_add() -> None:
         data = dialogs.member_dialog(panel)
@@ -163,10 +216,7 @@ def main() -> int:
             store.save(hwnds)
         pending = match_pending(cc_signals.read_pending_full(), members)
         to_raise = controller.update(pending)
-        for m in members:
-            panel.set_status(m.name, controller.status(m.name))
-            # 运行中(cockpit 启动且窗口还在)→ 屏蔽其 ▶ 启动键;窗口关掉则恢复
-            panel.set_running(m.name, _live_hwnd(m.name) is not None)
+        _refresh_states()                   # 明暗/运行键/状态灯 + 运行中靠前排序
         # 自动弹窗:只置前「cockpit 启动且句柄还在」的窗口,绝不新开。
         # (pending 按 cwd 匹配,可能命中你手动开的同目录 claude;那种 cockpit 没句柄,
         #  此时若走 start_member 就会重复开一个空白窗口——正是这个 bug。)
@@ -178,6 +228,11 @@ def main() -> int:
     timer = QTimer()
     timer.timeout.connect(tick)
     timer.start(1000)
+
+    # 启动中的成员单独快轮询(200ms),尽快抓到刚出现的控制台窗口句柄
+    launch_timer = QTimer()
+    launch_timer.timeout.connect(_poll_launching)
+    launch_timer.start(200)
 
     # 托盘:显隐面板 / 退出(用多只小青蛙图标)
     tray = QSystemTrayIcon(icon, app)
@@ -204,6 +259,7 @@ def main() -> int:
     server.listen(_SINGLE_KEY)
     server.newConnection.connect(_raise_panel)
 
+    _refresh_states()                        # 启动即按缓存句柄点亮/排序,不等首个 tick
     panel.show()
     return app.exec()
 
