@@ -6,10 +6,16 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
+
+# 图标:claude-groupchat 的「多只小青蛙」图,已复制进本包 assets
+ICON_PATH = Path(__file__).parent / "assets" / "icon.ico"
 
 # 状态 → 灯色
 _STATUS_COLOR = {
@@ -66,6 +72,8 @@ class Panel(QWidget):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setStyleSheet(_QSS)
         self.setMinimumWidth(248)
+        if ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(ICON_PATH)))
 
         self._dots: dict[str, QLabel] = {}
         self._gos: dict[str, QPushButton] = {}   # name -> ▶ 按钮(运行中时屏蔽)
@@ -124,6 +132,22 @@ class Panel(QWidget):
             root.addWidget(card)
 
         root.addStretch(1)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._dark_titlebar()   # 让原生标题栏也变深色,和面板统一
+
+    def _dark_titlebar(self) -> None:
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            # DWMWA_USE_IMMERSIVE_DARK_MODE:Win10 2004+ 用 20,更早的构建用 19
+            for attr in (20, 19):
+                v = ctypes.c_int(1)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
+        except Exception:
+            pass
 
     def set_running(self, name: str, running: bool) -> None:
         """运行中(cockpit 已启动且窗口还在)→ 屏蔽 ▶ 启动键(点卡片置前即可);

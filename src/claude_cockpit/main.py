@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QApplication, QMenu, QStyle, QSystemTrayIcon,
+    QApplication, QMenu, QSystemTrayIcon,
 )
 
 from . import cc_signals, winman
@@ -16,7 +16,7 @@ from .config import load_config
 from .controller import Controller
 from .launcher import launch, window_title
 from .matching import match_pending
-from .panel import Panel
+from .panel import ICON_PATH, Panel
 
 
 def _config_path() -> Path:
@@ -29,6 +29,14 @@ def _config_path() -> Path:
 def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+
+    icon = QIcon(str(ICON_PATH)) if ICON_PATH.exists() else QIcon()
+    app.setWindowIcon(icon)
+    try:                                # 让任务栏也用我们的图标(而非宿主 python 图标)
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("claude-cockpit")
+    except Exception:
+        pass
 
     members = load_config(_config_path())
     panel = Panel(members)
@@ -80,8 +88,7 @@ def main() -> int:
     timer.timeout.connect(tick)
     timer.start(1000)
 
-    # 托盘:显隐面板 / 退出(用系统标准图标,保证可见)
-    icon: QIcon = app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+    # 托盘:显隐面板 / 退出(用多只小青蛙图标)
     tray = QSystemTrayIcon(icon, app)
     menu = QMenu()
     menu.addAction("显示/隐藏面板",

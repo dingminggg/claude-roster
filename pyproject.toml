@@ -18,6 +18,9 @@ version = {attr = "claude_cockpit.__version__"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+claude_cockpit = ["assets/*"]
+
 [project.scripts]
 claude-cockpit = "claude_cockpit.main:main"
 
