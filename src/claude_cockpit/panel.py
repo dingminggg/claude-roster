@@ -26,10 +26,9 @@ _QSS = """
 QWidget#panel { background:#181a1f; }
 QLabel#title { color:#eaecef; font-size:14px; font-weight:700; }
 QLabel#subtitle { color:#6e7682; font-size:11px; }
-QFrame#card { background:#22252d; border-radius:10px; border:1px solid transparent; }
+QFrame#card { background:#22252d; border-radius:10px; }
 QFrame#card:hover { background:#2b2f3a; }
-QFrame#card[attn="true"] { background:#2c2920; border:1px solid #c79a2e; }
-QFrame#card[attn="true"]:hover { background:#34301f; }
+QLabel#env { color:#e0a72e; font-size:14px; background:transparent; }
 QFrame#addcard {
     background:transparent; border:1px dashed #3a3f4b; border-radius:10px;
 }
@@ -66,9 +65,6 @@ _RUNNING_QSS = ("color:#9be6b4; background:#1f3a29; border:none;"
 # 启动中:琥珀胶囊(提示正在拉起,中间这段以前没反馈)
 _LAUNCHING_QSS = ("color:#f1c40f; background:#3a3320; border:none;"
                   " border-radius:11px; font-size:11px; font-weight:600;")
-# 待处理:答完一轮等你看 —— 醒目的琥珀实心胶囊
-_ATTN_QSS = ("color:#1a1206; background:#e0a72e; border:none;"
-             " border-radius:11px; font-size:11px; font-weight:700;")
 
 
 class _Card(QFrame):
@@ -137,6 +133,7 @@ class Panel(QWidget):
             self.setWindowIcon(QIcon(str(ICON_PATH)))
 
         self._gos: dict[str, QPushButton] = {}
+        self._envs: dict[str, QLabel] = {}     # 每行的「有新消息」小信封
         self._effects: dict[str, QGraphicsOpacityEffect] = {}
         self._cards: dict[str, _Card] = {}
         self._confirm_boxes: dict[str, QWidget] = {}   # 内联「确定/取消」条
@@ -187,6 +184,14 @@ class Panel(QWidget):
         name.setStyleSheet(f"color:{m.color};")
         lay.addWidget(name, 1)
 
+        # 「有新消息」小信封:始终占位(固定宽),只切换 ✉/空,免得右侧胶囊忽左忽右
+        env = QLabel("")
+        env.setObjectName("env")
+        env.setFixedWidth(18)
+        env.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._envs[m.name] = env
+
         go = QPushButton("启动")
         go.setObjectName("go")
         go.setFixedSize(_GO_W, _GO_H)
@@ -235,6 +240,7 @@ class Panel(QWidget):
                 w.setParent(None)
                 w.deleteLater()
         self._gos.clear()
+        self._envs.clear()
         self._effects.clear()
         self._cards.clear()
         self._confirm_boxes.clear()
@@ -283,20 +289,16 @@ class Panel(QWidget):
             go.setVisible(True)
         self.start_requested.emit(name)
 
-    def _set_attn(self, card, on: bool) -> None:
-        """切换卡片的「待处理」高亮(琥珀边框);只在变化时 repolish,免得闪。"""
-        if card is None:
-            return
-        val = "true" if on else "false"
-        if card.property("attn") != val:
-            card.setProperty("attn", val)
-            card.style().unpolish(card)
-            card.style().polish(card)
+    def set_message(self, name: str, on: bool) -> None:
+        """切换这一行的「有新消息」小信封(答完一轮/等你);不动运行键文字。"""
+        env = self._envs.get(name)
+        if env is not None:
+            env.setText("✉" if on else "")
+            env.setToolTip("有新消息 · 点这张卡查看并已读" if on else "")
 
     def set_run_state(self, name: str, state: str) -> None:
-        """state ∈ {down(未运行), launching(启动中), running(运行中),
-        attention(答完一轮·待处理)}。控制整卡明暗/高亮 + 右侧运行键;
-        确认态优先(显示确定/取消)。"""
+        """state ∈ {down(未运行), launching(启动中), running(运行中)}。
+        控制整卡明暗 + 右侧运行键的文字/样式;确认态优先(显示确定/取消)。"""
         if state != "down":                     # 一旦进入启动/运行,确认态作废
             self._confirming.discard(name)
         confirming = name in self._confirming and state == "down"
@@ -305,12 +307,9 @@ class Panel(QWidget):
         if box is not None:
             box.setVisible(confirming)
         card = self._cards.get(name)
-        if card is not None:                    # 运行/待处理时横条才是手型 + 可点
-            card.setCursor(
-                Qt.CursorShape.PointingHandCursor
-                if state in ("running", "attention")
-                else Qt.CursorShape.ArrowCursor)
-            self._set_attn(card, state == "attention")
+        if card is not None:                    # 运行后横条才是手型 + 可点置前
+            card.setCursor(Qt.CursorShape.PointingHandCursor if state == "running"
+                           else Qt.CursorShape.ArrowCursor)
         eff = self._effects.get(name)
         if eff is not None:                     # 确认中也点亮;纯未运行才置灰
             eff.setOpacity(_DIM if (state == "down" and not confirming) else 1.0)
@@ -322,12 +321,7 @@ class Panel(QWidget):
         if confirming:
             return
         # 尺寸三态统一(_GO_W×_GO_H),只换文字/配色,右侧始终对齐成一列
-        if state == "attention":
-            go.setEnabled(False)
-            go.setText("待处理")
-            go.setStyleSheet(_ATTN_QSS)
-            go.setToolTip("答完一轮等你看 · 点这张卡查看并已读")
-        elif state == "running":
+        if state == "running":
             go.setEnabled(False)
             go.setText("运行中")
             go.setStyleSheet(_RUNNING_QSS)

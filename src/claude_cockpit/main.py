@@ -84,16 +84,13 @@ def main() -> int:
         return h if (h and winman.is_window(h)) else None
 
     def _state_of(name: str) -> str:
-        live = _live_hwnd(name) is not None
-        if live and name in cur_pending:    # 答完一轮/等权限 且窗口在 → 待处理
-            return "attention"
-        if live:
+        if _live_hwnd(name) is not None:
             return "running"
         if name in launching:
             return "launching"
         return "down"
 
-    _RANK = {"attention": 0, "running": 1, "launching": 2, "down": 3}
+    _RANK = {"running": 0, "launching": 1, "down": 2}
 
     def _refresh_states() -> None:
         """刷新每张卡的明暗/运行键,并把运行中/启动中的卡排到前面。"""
@@ -102,6 +99,9 @@ def main() -> int:
         states = {m.name: _state_of(m.name) for m in members}
         for m in members:
             panel.set_run_state(m.name, states[m.name])
+            # 有新消息小信封:窗口还在 且 答完一轮/等你
+            panel.set_message(m.name,
+                              states[m.name] == "running" and m.name in cur_pending)
         order = sorted(states, key=lambda n: (_RANK[states[n]], pos[n]))
         if order != last_order:
             panel.set_order(order)
