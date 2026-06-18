@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QPushButton,
     QVBoxLayout, QWidget,
@@ -36,6 +36,7 @@ QFrame#addcard:hover { background:#22252d; border-color:#34965a; }
 QLabel#addtext { color:#7b828d; font-size:13px; font-weight:600; background:transparent; }
 QFrame#addcard:hover QLabel#addtext { color:#9be6b4; }
 QLabel#name { font-size:13px; font-weight:600; background:transparent; }
+QLabel#ctitle { color:#6e7682; font-size:10px; background:transparent; }
 QPushButton#go {
     color:#c7ccd6; background:#2f343f; border:none; border-radius:11px;
     font-size:11px; font-weight:600; padding:0;
@@ -56,6 +57,8 @@ QPushButton#no:hover { background:#4a505e; color:#ffffff; }
 
 # 运行键统一尺寸:三种状态同宽,右侧排成一条干净的竖列(不再忽大忽小)
 _GO_W, _GO_H = 56, 22
+# 名字下方会话标题的最大显示宽度(px),超出用省略号截断(面板固定宽 310)
+_CTITLE_W = 185
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
@@ -134,6 +137,8 @@ class Panel(QWidget):
 
         self._gos: dict[str, QPushButton] = {}
         self._envs: dict[str, QLabel] = {}     # 每行的「有新消息」小信封
+        self._ctitles: dict[str, QLabel] = {}  # 名字下面那行:成员会话的实时窗口标题
+        self._ctitle_raw: dict[str, str] = {}  # 标题原文(用于宽度变化时重新省略)
         self._effects: dict[str, QGraphicsOpacityEffect] = {}
         self._cards: dict[str, _Card] = {}
         self._confirm_boxes: dict[str, QWidget] = {}   # 内联「确定/取消」条
@@ -186,20 +191,38 @@ class Panel(QWidget):
         accent.setStyleSheet(f"background:{m.color}; border-radius:2px;")
         lay.addWidget(accent)
 
+        # 左侧一列:第一行 名字 + 信封,第二行 该会话的实时窗口标题(小灰字)
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(1)
+
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.setSpacing(6)
         name = QLabel(f"{m.emoji}  @{m.name}")
         name.setObjectName("name")
         name.setStyleSheet(f"color:{m.color};")
-        lay.addWidget(name, 0)
+        row1.addWidget(name, 0)
 
         # 「有新消息」小信封:紧跟名字后面,始终占位(固定宽),只切换 ✉/空,闪烁
         env = QLabel()
         env.setObjectName("env")
         env.setFixedWidth(26)
         env.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
+        row1.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
         self._envs[m.name] = env
+        row1.addStretch(1)
+        col.addLayout(row1)
 
-        lay.addStretch(1)                       # 弹簧把运行键顶到最右
+        # 名字下面:成员会话的实时窗口标题(claude 起来后会改成它当前状态)。
+        # 空就藏起来不占行高;过长由 set_title 省略号截断。
+        ctitle = QLabel()
+        ctitle.setObjectName("ctitle")
+        ctitle.setVisible(False)
+        col.addWidget(ctitle)
+        self._ctitles[m.name] = ctitle
+
+        lay.addLayout(col, 1)                   # 这一列吃掉中间空间,把运行键顶到最右
 
         go = QPushButton("启动")
         go.setObjectName("go")
@@ -250,6 +273,8 @@ class Panel(QWidget):
                 w.deleteLater()
         self._gos.clear()
         self._envs.clear()
+        self._ctitles.clear()
+        self._ctitle_raw.clear()
         self._effects.clear()
         self._cards.clear()
         self._confirm_boxes.clear()
@@ -322,6 +347,25 @@ class Panel(QWidget):
             self._msg_on.discard(name)
         env.setToolTip("有新消息 · 点这张卡查看并已读" if on else "")
         self._apply_dot(name)
+
+    def set_title(self, name: str, text: str) -> None:
+        """名字下面那行:成员会话控制台的实时窗口标题。
+        空 / 仍是启动占位标题(CCKPT:<name>)→ 藏起来不占行高;过长省略号截断。"""
+        lbl = self._ctitles.get(name)
+        if lbl is None:
+            return
+        text = (text or "").strip()
+        if text in ("", f"CCKPT:{name}"):
+            self._ctitle_raw.pop(name, None)
+            lbl.setVisible(False)
+            lbl.clear()
+            return
+        self._ctitle_raw[name] = text
+        elided = QFontMetrics(lbl.font()).elidedText(
+            text, Qt.TextElideMode.ElideRight, _CTITLE_W)
+        lbl.setText(elided)
+        lbl.setToolTip(text)
+        lbl.setVisible(True)
 
     def set_run_state(self, name: str, state: str) -> None:
         """state ∈ {down(未运行), launching(启动中), running(运行中)}。

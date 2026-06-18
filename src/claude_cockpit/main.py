@@ -257,6 +257,10 @@ def main() -> int:
         acked.intersection_update(pending)  # 不再 pending 的从已确认里移除 → 再来会重新闪
         # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
         _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
+        # 名字下面那行:用缓存的活句柄直接读控制台标题(claude 起来后会改成它的状态)
+        for m in members:
+            h = _live_hwnd(m.name)
+            panel.set_title(m.name, winman.get_title(h) if h is not None else "")
 
     timer = QTimer()
     timer.timeout.connect(tick)

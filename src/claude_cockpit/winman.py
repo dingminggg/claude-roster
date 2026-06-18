@@ -37,6 +37,20 @@ def find_by_title(needle: str) -> int | None:
     return found[0] if found else None
 
 
+def get_title(hwnd: int) -> str:
+    """读已知句柄的窗口标题(用于显示;不参与判活)。读不到返回空串。
+    用缓存的活句柄直接取,不枚举窗口、不违反「只认句柄」约束。"""
+    try:
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n <= 0:
+            return ""
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        return buf.value
+    except Exception:
+        return ""
+
+
 def is_window(hwnd: int) -> bool:
     """句柄是否仍指向一个存在的窗口(用户关掉控制台后即失效)。"""
     try:
