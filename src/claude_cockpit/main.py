@@ -148,11 +148,18 @@ def main() -> int:
                 cc_signals.clear_turn_ended(rec["session_id"])
 
     def on_row_click(name: str) -> None:
-        """点成员横条:已运行 → 把它的控制台最大化弹到眼前 + 标记已读(清 turn-ended)
+        """点成员横条:已运行 → 先把其它还活着的控制台最小化(多屏下都最大化时
+        没法一眼区分),再把它的控制台最大化弹到眼前 + 标记已读(清 turn-ended)
         + 确认闪烁(托盘停闪)。未运行/启动中无反应。"""
         h = _live_hwnd(name)
         if h is not None:
             _ack_blink()                    # 点了列表 → 停闪
+            for other in members:           # 只碰缓存里且还活着的句柄,绝不 launch
+                if other.name == name:
+                    continue
+                oh = _live_hwnd(other.name)
+                if oh is not None:
+                    winman.minimize(oh)
             winman.maximize(h)              # 点谁就把谁最大化(不再自动弹)
             _dismiss(name)
 
