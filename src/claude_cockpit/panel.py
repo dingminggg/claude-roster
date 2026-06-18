@@ -148,7 +148,7 @@ class Panel(QWidget):
         titles.setSpacing(1)
         t = QLabel("Claude 驾驶舱")
         t.setObjectName("title")
-        sub = QLabel("点「启动」开 · 答完自动弹窗+闪烁 · 点横条=已读/置前")
+        sub = QLabel("点「启动」开 · 答完亮✉+闪烁 · 点横条=最大化/已读")
         sub.setObjectName("subtitle")
         titles.addWidget(t)
         titles.addWidget(sub)

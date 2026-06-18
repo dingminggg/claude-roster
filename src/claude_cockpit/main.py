@@ -70,9 +70,6 @@ def main() -> int:
     blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
     cur_pending: set[str] = set()       # 当前「该你看了」的成员(tick 刷新)
     acked: set[str] = set()             # 已确认过闪烁的成员:列表仍标待处理,只是不再闪
-    # 「该你看了」队列:成员答完一轮按先后入队,顺序处理(弹一个,处理掉再弹下一个)
-    pending_queue: list[str] = []
-    shown_front = {"name": None}        # 当前已最大化到前台的队首
 
     def _ack_blink() -> None:
         """你已经在看了(点了托盘图标 / 点了某张卡)→ 当前 pending 全部标为已确认,
@@ -151,12 +148,12 @@ def main() -> int:
                 cc_signals.clear_turn_ended(rec["session_id"])
 
     def on_row_click(name: str) -> None:
-        """点成员横条:已运行 → 置前 + 标记已读(清该成员 turn-ended,出队);
-        同时确认闪烁(托盘停闪)。未运行/启动中无反应。"""
+        """点成员横条:已运行 → 把它的控制台最大化弹到眼前 + 标记已读(清 turn-ended)
+        + 确认闪烁(托盘停闪)。未运行/启动中无反应。"""
         h = _live_hwnd(name)
         if h is not None:
             _ack_blink()                    # 点了列表 → 停闪
-            winman.bring_to_front(h)
+            winman.maximize(h)              # 点谁就把谁最大化(不再自动弹)
             _dismiss(name)
 
     def on_start(name: str) -> None:
@@ -251,19 +248,8 @@ def main() -> int:
         cur_pending.clear()
         cur_pending.update(pending)
         acked.intersection_update(pending)  # 不再 pending 的从已确认里移除 → 再来会重新闪
-        # 维护队列:新「该你看了」的按成员序入队,已处理(不再 pending)的出队
-        for m in members:
-            if m.name in pending and m.name not in pending_queue:
-                pending_queue.append(m.name)
-        pending_queue[:] = [n for n in pending_queue if n in pending]
-        _refresh_states()                   # 明暗/运行键 + 运行中靠前排序
-        # 顺序处理:只把队首中「有存活句柄」的那个最大化弹到眼前;它被处理掉
-        # (你回话/点横条已读)出队后,下一个自动顶上。手动开的同目录会话没句柄→跳过。
-        front = next((n for n in pending_queue if _live_hwnd(n) is not None), None)
-        if front != shown_front["name"]:
-            shown_front["name"] = front
-            if front is not None:
-                winman.maximize(_live_hwnd(front))
+        # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
+        _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
 
     timer = QTimer()
     timer.timeout.connect(tick)
