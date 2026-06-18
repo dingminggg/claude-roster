@@ -28,7 +28,7 @@ QLabel#title { color:#eaecef; font-size:14px; font-weight:700; }
 QLabel#subtitle { color:#6e7682; font-size:11px; }
 QFrame#card { background:#22252d; border-radius:10px; }
 QFrame#card:hover { background:#2b2f3a; }
-QLabel#env { background:transparent; }
+QLabel#env { color:#ff4d4f; font-size:16px; background:transparent; }
 QFrame#addcard {
     background:transparent; border:1px dashed #3a3f4b; border-radius:10px;
 }
@@ -191,10 +191,11 @@ class Panel(QWidget):
         name.setStyleSheet(f"color:{m.color};")
         lay.addWidget(name, 0)
 
-        # 「有新消息」红点角标:紧跟名字后面,始终占位 10px,只切红/透明
+        # 「有新消息」小信封:紧跟名字后面,始终占位(固定宽),只切换 ✉/空,闪烁
         env = QLabel()
         env.setObjectName("env")
-        env.setFixedSize(10, 10)
+        env.setFixedWidth(22)
+        env.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
         self._envs[m.name] = env
 
@@ -303,8 +304,7 @@ class Panel(QWidget):
         if env is None:
             return
         lit = name in self._msg_on and self._blink_on   # 有消息且当前在「亮」相位
-        env.setStyleSheet("background:#ff4d4f; border-radius:5px;" if lit
-                          else "background:transparent;")
+        env.setText("✉" if lit else "")
 
     def _blink_dots(self) -> None:
         self._blink_on = not self._blink_on
