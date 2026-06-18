@@ -38,8 +38,7 @@ def _display_name(cwd: str) -> str:
     return base or "Claude Code"
 
 
-def write_pending(session_id: str, message: str = "", cwd: str = "") -> None:
-    d = pending_dir()
+def _atomic_write(d: Path, session_id: str, message: str, cwd: str) -> None:
     d.mkdir(parents=True, exist_ok=True)
     target = d / f"{_safe_name(session_id)}.json"
     payload = {
@@ -61,12 +60,45 @@ def write_pending(session_id: str, message: str = "", cwd: str = "") -> None:
         raise
 
 
-def clear_pending(session_id: str) -> None:
-    target = pending_dir() / f"{_safe_name(session_id)}.json"
+def _remove(d: Path, session_id: str) -> None:
     try:
-        target.unlink()
+        (d / f"{_safe_name(session_id)}.json").unlink()
     except (FileNotFoundError, OSError):
         pass
+
+
+def _read_full(d: Path) -> list[dict]:
+    if not d.exists():
+        return []
+    out: list[dict] = []
+    for f in d.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("session_id"):
+            out.append(data)
+    return out
+
+
+def _prune(d: Path, max_age_seconds: int) -> None:
+    if not d.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    for f in d.glob("*.json"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
+def write_pending(session_id: str, message: str = "", cwd: str = "") -> None:
+    _atomic_write(pending_dir(), session_id, message, cwd)
+
+
+def clear_pending(session_id: str) -> None:
+    _remove(pending_dir(), session_id)
 
 
 def read_pending() -> dict[str, str]:
@@ -90,18 +122,7 @@ def read_pending() -> dict[str, str]:
 def read_pending_full() -> list[dict]:
     """返回每条 pending 的完整记录 [{session_id, message, cwd, at}, ...]。
     匹配成员要用 cwd,而 read_pending() 只给显示名,故另开此函数。"""
-    d = pending_dir()
-    if not d.exists():
-        return []
-    out: list[dict] = []
-    for f in d.glob("*.json"):
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(data, dict) and data.get("session_id"):
-            out.append(data)
-    return out
+    return _read_full(pending_dir())
 
 
 def poll_pending(max_age_seconds: int = 600) -> dict[str, str]:
@@ -111,13 +132,31 @@ def poll_pending(max_age_seconds: int = 600) -> dict[str, str]:
 
 
 def prune_stale(max_age_seconds: int = 600) -> None:
-    d = pending_dir()
-    if not d.exists():
-        return
-    cutoff = time.time() - max_age_seconds
-    for f in d.glob("*.json"):
-        try:
-            if f.stat().st_mtime < cutoff:
-                f.unlink()
-        except OSError:
-            pass
+    _prune(pending_dir(), max_age_seconds)
+
+
+# ── 驾驶舱专属信号:成员「答完一轮」(Stop hook 写入)。──
+# 与桌宠共享的「权限 pending」分开放在另一个目录,免得桌宠对每一轮结束都唠叨。
+# 只有 claude-cockpit 读 turn-ended/;桌宠完全不碰,行为不变。
+def cockpit_data_dir() -> Path:
+    return Path.home() / ".claude" / "data" / "claude-cockpit"
+
+
+def turn_dir() -> Path:
+    return cockpit_data_dir() / "turn-ended"
+
+
+def write_turn_ended(session_id: str, message: str = "", cwd: str = "") -> None:
+    _atomic_write(turn_dir(), session_id, message, cwd)
+
+
+def clear_turn_ended(session_id: str) -> None:
+    _remove(turn_dir(), session_id)
+
+
+def read_turn_ended_full() -> list[dict]:
+    return _read_full(turn_dir())
+
+
+def prune_turn_ended(max_age_seconds: int = 1800) -> None:
+    _prune(turn_dir(), max_age_seconds)

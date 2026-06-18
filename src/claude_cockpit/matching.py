@@ -6,11 +6,14 @@ import os
 from .config import Member
 
 
-def _norm(p: str | os.PathLike) -> str:
+def norm_path(p: str | os.PathLike) -> str:
     try:
         return os.path.normcase(os.path.normpath(os.path.abspath(str(p))))
     except Exception:
         return ""
+
+
+_norm = norm_path   # 兼容旧名
 
 
 def match_pending(pending: list[dict], members: list[Member]) -> set[str]:

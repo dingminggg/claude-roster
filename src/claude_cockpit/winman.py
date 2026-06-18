@@ -11,6 +11,7 @@ kernel32 = ctypes.windll.kernel32
 
 SW_RESTORE = 9
 SW_MINIMIZE = 6
+SW_MAXIMIZE = 3
 
 _EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -77,22 +78,36 @@ def wait_for_title(needle: str, timeout: float = 8.0, interval: float = 0.1) -> 
         time.sleep(interval)
 
 
+def _force_foreground(hwnd: int) -> None:
+    """用 AttachThreadInput 绕过后台进程置前限制,把窗口拉到最前并取得焦点。"""
+    fg = user32.GetForegroundWindow()
+    cur_tid = kernel32.GetCurrentThreadId()
+    target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+    fg_tid = user32.GetWindowThreadProcessId(fg, None)
+    for tid in {target_tid, fg_tid}:
+        if tid and tid != cur_tid:
+            user32.AttachThreadInput(cur_tid, tid, True)
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    for tid in {target_tid, fg_tid}:
+        if tid and tid != cur_tid:
+            user32.AttachThreadInput(cur_tid, tid, False)
+
+
 def bring_to_front(hwnd: int) -> None:
-    """还原 + 置前。用 AttachThreadInput 绕过后台进程置前限制;失败退化为闪任务栏。"""
+    """还原 + 置前。失败退化为闪任务栏。"""
     try:
         user32.ShowWindow(hwnd, SW_RESTORE)
-        fg = user32.GetForegroundWindow()
-        cur_tid = kernel32.GetCurrentThreadId()
-        target_tid = user32.GetWindowThreadProcessId(hwnd, None)
-        fg_tid = user32.GetWindowThreadProcessId(fg, None)
-        for tid in {target_tid, fg_tid}:
-            if tid and tid != cur_tid:
-                user32.AttachThreadInput(cur_tid, tid, True)
-        user32.BringWindowToTop(hwnd)
-        user32.SetForegroundWindow(hwnd)
-        for tid in {target_tid, fg_tid}:
-            if tid and tid != cur_tid:
-                user32.AttachThreadInput(cur_tid, tid, False)
+        _force_foreground(hwnd)
+    except Exception:
+        pass
+
+
+def maximize(hwnd: int) -> None:
+    """最大化 + 置前。成员答完一轮时把它的控制台铺满弹到眼前。"""
+    try:
+        user32.ShowWindow(hwnd, SW_MAXIMIZE)
+        _force_foreground(hwnd)
     except Exception:
         pass
 

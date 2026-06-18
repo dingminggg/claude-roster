@@ -14,9 +14,8 @@ from PySide6.QtWidgets import (
 
 from . import cc_signals, dialogs, store, winman
 from .config import Member, load_config, save_config, validate_member
-from .controller import Controller
 from .launcher import launch, window_title
-from .matching import match_pending
+from .matching import match_pending, norm_path
 from .panel import ICON_PATH, Panel
 
 
@@ -56,7 +55,6 @@ def main() -> int:
     cfg_path = _config_path()
     members = load_config(cfg_path)
     panel = Panel(members)
-    controller = Controller([m.name for m in members])
     by_name = {m.name: m for m in members}
     # name -> 控制台窗口句柄。落盘缓存:退出/重启 cockpit 后载回,凡是句柄仍指向
     # 一个存活的控制台窗口就复用(置前 / 屏蔽 ▶),不必重开;失效的丢弃。
@@ -69,8 +67,11 @@ def main() -> int:
     # 期间卡片显示「启动中」给反馈;窗口一抓到就转「运行中」。
     launching: dict[str, int] = {}
     last_order: list[str] = []
-    # 托盘闪烁:面板最小化/隐藏时,只要有成员等你确认就让托盘图标闪
+    # 托盘闪烁:只要有成员「该你看了」(答完一轮/等权限)就闪
     blink_state = {"pending": False, "on": False}
+    # 「该你看了」队列:成员答完一轮按先后入队,顺序处理(弹一个,处理掉再弹下一个)
+    pending_queue: list[str] = []
+    shown_front = {"name": None}        # 当前已最大化到前台的队首
 
     def _live_hwnd(name: str) -> int | None:
         h = hwnds.get(name)
@@ -86,13 +87,12 @@ def main() -> int:
     _RANK = {"running": 0, "launching": 1, "down": 2}
 
     def _refresh_states() -> None:
-        """刷新每张卡的明暗/运行键 + 状态灯,并把运行中/启动中的卡排到前面。"""
+        """刷新每张卡的明暗/运行键,并把运行中/启动中的卡排到前面。"""
         nonlocal last_order
         pos = {m.name: i for i, m in enumerate(members)}
         states = {m.name: _state_of(m.name) for m in members}
         for m in members:
             panel.set_run_state(m.name, states[m.name])
-            panel.set_status(m.name, controller.status(m.name))
         order = sorted(states, key=lambda n: (_RANK[states[n]], pos[n]))
         if order != last_order:
             panel.set_order(order)
@@ -130,12 +130,23 @@ def main() -> int:
         if done:
             _refresh_states()
 
+    def _dismiss(name: str) -> None:
+        """标记「已读」:清掉该成员(按 cwd 匹配)的所有 turn-ended 信号,
+        于是它停闪、出队,队首顶到下一个。权限 pending 不在此清(那得真去答)。"""
+        m = by_name.get(name)
+        if m is None:
+            return
+        target = norm_path(m.cwd)
+        for rec in cc_signals.read_turn_ended_full():
+            if norm_path(rec.get("cwd", "")) == target and rec.get("session_id"):
+                cc_signals.clear_turn_ended(rec["session_id"])
+
     def on_row_click(name: str) -> None:
-        """点成员横条:仅在「已运行」时把窗口置前;未运行/启动中一律无反应,
-        从根上杜绝误点横条把控制台开起来。"""
+        """点成员横条:已运行 → 置前 + 标记已读(停闪/出队);未运行/启动中无反应。"""
         h = _live_hwnd(name)
         if h is not None:
             winman.bring_to_front(h)
+            _dismiss(name)
 
     def on_start(name: str) -> None:
         """面板里点「启动」→「确定」后发来:拉起控制台(已运行/启动中忽略)。
@@ -155,7 +166,6 @@ def main() -> int:
             save_config(cfg_path, members)
         except Exception as e:
             QMessageBox.warning(panel, "写回 agents.yaml 失败", str(e))
-        controller.set_members([m.name for m in members])
         panel.rebuild(members)
         last_order = []                     # 强制重排(卡片已重建)
         _refresh_states()
@@ -222,17 +232,25 @@ def main() -> int:
             for n in dead:
                 hwnds.pop(n, None)
             store.save(hwnds)
-        pending = match_pending(cc_signals.read_pending_full(), members)
+        cc_signals.prune_turn_ended()       # 清掉没触发 clear 的陈旧「该你看了」
+        # 「该你看了」= 答完一轮(turn-ended,驾驶舱专属) ∪ 等权限(与桌宠共享)
+        pending = match_pending(
+            cc_signals.read_turn_ended_full() + cc_signals.read_pending_full(),
+            members)
         blink_state["pending"] = bool(pending)
-        to_raise = controller.update(pending)
-        _refresh_states()                   # 明暗/运行键/状态灯 + 运行中靠前排序
-        # 自动弹窗:只置前「cockpit 启动且句柄还在」的窗口,绝不新开。
-        # (pending 按 cwd 匹配,可能命中你手动开的同目录 claude;那种 cockpit 没句柄,
-        #  此时若走 start_member 就会重复开一个空白窗口——正是这个 bug。)
-        for name in to_raise:
-            h = _live_hwnd(name)
-            if h is not None:
-                winman.bring_to_front(h)
+        # 维护队列:新「该你看了」的按成员序入队,已处理(不再 pending)的出队
+        for m in members:
+            if m.name in pending and m.name not in pending_queue:
+                pending_queue.append(m.name)
+        pending_queue[:] = [n for n in pending_queue if n in pending]
+        _refresh_states()                   # 明暗/运行键 + 运行中靠前排序
+        # 顺序处理:只把队首中「有存活句柄」的那个最大化弹到眼前;它被处理掉
+        # (你回话/点横条已读)出队后,下一个自动顶上。手动开的同目录会话没句柄→跳过。
+        front = next((n for n in pending_queue if _live_hwnd(n) is not None), None)
+        if front != shown_front["name"]:
+            shown_front["name"] = front
+            if front is not None:
+                winman.maximize(_live_hwnd(front))
 
     timer = QTimer()
     timer.timeout.connect(tick)
@@ -268,13 +286,12 @@ def main() -> int:
                  QSystemTrayIcon.ActivationReason.DoubleClick) else None)
     tray.show()
 
-    # 闪烁:面板不在眼前(最小化/隐藏)且有人 pending → 托盘图标在 图标/空 间交替。
-    # 一直跑的轻量定时器:不需要闪时就把图标复位,需要时才交替。
+    # 闪烁:只要有成员「该你看了」(答完一轮/等权限)→ 托盘图标在 图标/空 间交替。
+    # 与最大化弹窗相伴;处理完(回话/点横条已读)pending 清空就停闪复位。
     _empty_icon = QIcon()
 
     def _blink_tick() -> None:
-        want = blink_state["pending"] and _panel_away()
-        if not want:
+        if not blink_state["pending"]:
             if blink_state["on"]:
                 blink_state["on"] = False
             tray.setIcon(icon)
@@ -282,7 +299,7 @@ def main() -> int:
             return
         blink_state["on"] = not blink_state["on"]
         tray.setIcon(_empty_icon if blink_state["on"] else icon)
-        tray.setToolTip("有成员在等你确认 · 点我打开")
+        tray.setToolTip("有成员答完/等你 · 点我打开")
 
     blink_timer = QTimer()
     blink_timer.timeout.connect(_blink_tick)

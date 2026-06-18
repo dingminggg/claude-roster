@@ -1,12 +1,12 @@
-"""常驻轻量面板(深色卡片风):每个成员一张卡(配色条 + 状态灯 + 名字 + 运行键),
-整卡左键 = 置前/启动其控制台;右键 = 编辑/删除;列表最底部一张「＋ 新成员」卡。
+"""常驻轻量面板(深色卡片风):每个成员一张卡(配色条 + 名字 + 运行键),
+整卡左键 = 置前/已读其控制台;右键 = 编辑/删除;列表最底部一张「＋ 新成员」卡。
 
 运行中的成员排在最前、整卡点亮;未运行的置灰排后。
 
 对外接口(main 依赖):
-  Panel(members) / set_status(name,status) / set_run_state(name,state) /
-  set_order(names) / rebuild(members)
-  信号:member_clicked(str)、add_requested()、edit_requested(str)、delete_requested(str)
+  Panel(members) / set_run_state(name,state) / set_order(names) / rebuild(members)
+  信号:member_clicked(str)、start_requested(str)、add_requested()、
+        edit_requested(str)、delete_requested(str)
 """
 from __future__ import annotations
 
@@ -22,13 +22,6 @@ from PySide6.QtWidgets import (
 # 图标:claude-groupchat 的「多只小青蛙」图,已复制进本包 assets
 ICON_PATH = Path(__file__).parent / "assets" / "icon.ico"
 
-_STATUS_COLOR = {
-    "pending": "#f1c40f",   # 琥珀:等你确认
-    "busy": "#3fb950",      # 绿:处理中(v2 预留)
-    "idle": "#6b7280",      # 灰:空闲 / 已启动
-    "down": "#3a3f4b",      # 暗:未运行
-}
-
 _QSS = """
 QWidget#panel { background:#181a1f; }
 QLabel#title { color:#eaecef; font-size:14px; font-weight:700; }
@@ -42,7 +35,6 @@ QFrame#addcard:hover { background:#22252d; border-color:#34965a; }
 QLabel#addtext { color:#7b828d; font-size:13px; font-weight:600; background:transparent; }
 QFrame#addcard:hover QLabel#addtext { color:#9be6b4; }
 QLabel#name { font-size:13px; font-weight:600; background:transparent; }
-QLabel#dot { background:transparent; }
 QPushButton#go {
     color:#c7ccd6; background:#2f343f; border:none; border-radius:11px;
     font-size:11px; font-weight:600; padding:0;
@@ -72,10 +64,6 @@ _RUNNING_QSS = ("color:#9be6b4; background:#1f3a29; border:none;"
 # 启动中:琥珀胶囊(提示正在拉起,中间这段以前没反馈)
 _LAUNCHING_QSS = ("color:#f1c40f; background:#3a3320; border:none;"
                   " border-radius:11px; font-size:11px; font-weight:600;")
-
-
-def _dot_qss(color: str) -> str:
-    return f"background:{color}; border-radius:6px;"
 
 
 class _Card(QFrame):
@@ -142,7 +130,6 @@ class Panel(QWidget):
         if ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(ICON_PATH)))
 
-        self._dots: dict[str, QLabel] = {}
         self._gos: dict[str, QPushButton] = {}
         self._effects: dict[str, QGraphicsOpacityEffect] = {}
         self._cards: dict[str, _Card] = {}
@@ -158,7 +145,7 @@ class Panel(QWidget):
         titles.setSpacing(1)
         t = QLabel("Claude 驾驶舱")
         t.setObjectName("title")
-        sub = QLabel("点「启动」开 · 运行后点横条置前 · 右键编辑/删除")
+        sub = QLabel("点「启动」开 · 答完自动弹窗+闪烁 · 点横条=已读/置前")
         sub.setObjectName("subtitle")
         titles.addWidget(t)
         titles.addWidget(sub)
@@ -188,13 +175,6 @@ class Panel(QWidget):
         accent.setMinimumHeight(40)
         accent.setStyleSheet(f"background:{m.color}; border-radius:2px;")
         lay.addWidget(accent)
-
-        dot = QLabel()
-        dot.setObjectName("dot")
-        dot.setFixedSize(12, 12)
-        dot.setStyleSheet(_dot_qss(_STATUS_COLOR["down"]))
-        lay.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._dots[m.name] = dot
 
         name = QLabel(f"{m.emoji}  @{m.name}")
         name.setObjectName("name")
@@ -248,7 +228,6 @@ class Panel(QWidget):
             if w is not None and w is not self._add_card:
                 w.setParent(None)
                 w.deleteLater()
-        self._dots.clear()
         self._gos.clear()
         self._effects.clear()
         self._cards.clear()
@@ -338,13 +317,6 @@ class Panel(QWidget):
             go.setText("启动")
             go.setStyleSheet("")                # 回退到 #go 默认样式
             go.setToolTip("启动这个成员的控制台")
-
-    def set_status(self, name: str, status: str) -> None:
-        dot = self._dots.get(name)
-        if dot is not None:
-            dot.setStyleSheet(_dot_qss(_STATUS_COLOR.get(status, _STATUS_COLOR["down"])))
-            dot.setToolTip({"pending": "等你确认", "busy": "处理中",
-                            "idle": "空闲", "down": "未运行"}.get(status, status))
 
     def showEvent(self, e):
         super().showEvent(e)
