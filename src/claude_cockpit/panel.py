@@ -28,7 +28,7 @@ QLabel#title { color:#eaecef; font-size:14px; font-weight:700; }
 QLabel#subtitle { color:#6e7682; font-size:11px; }
 QFrame#card { background:#22252d; border-radius:10px; }
 QFrame#card:hover { background:#2b2f3a; }
-QLabel#env { color:#e0a72e; font-size:14px; background:transparent; }
+QLabel#env { color:#e0a72e; font-size:19px; background:transparent; }
 QFrame#addcard {
     background:transparent; border:1px dashed #3a3f4b; border-radius:10px;
 }
@@ -187,7 +187,7 @@ class Panel(QWidget):
         # 「有新消息」小信封:始终占位(固定宽),只切换 ✉/空,免得右侧胶囊忽左忽右
         env = QLabel("")
         env.setObjectName("env")
-        env.setFixedWidth(18)
+        env.setFixedWidth(24)
         env.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
         self._envs[m.name] = env
