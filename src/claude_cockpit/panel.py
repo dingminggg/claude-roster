@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QPushButton,
@@ -138,6 +138,8 @@ class Panel(QWidget):
         self._cards: dict[str, _Card] = {}
         self._confirm_boxes: dict[str, QWidget] = {}   # 内联「确定/取消」条
         self._confirming: set[str] = set()             # 当前处于确认态的成员
+        self._msg_on: set[str] = set()                 # 当前有新消息(红点)的成员
+        self._blink_on = True                          # 红点闪烁相位
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 14)
@@ -163,6 +165,11 @@ class Panel(QWidget):
         self._add_card.clicked.connect(self.add_requested.emit)
 
         self.rebuild(members)
+
+        # 红点闪烁:有新消息的行,红点在 红↔灭 间交替,比静止更醒目
+        self._blink_timer = QTimer(self)
+        self._blink_timer.timeout.connect(self._blink_dots)
+        self._blink_timer.start(550)
 
     def _make_card(self, m) -> _Card:
         card = _Card()
@@ -244,6 +251,7 @@ class Panel(QWidget):
         self._cards.clear()
         self._confirm_boxes.clear()
         self._confirming.clear()
+        self._msg_on.clear()
         for m in members:
             self._list.addWidget(self._make_card(m))
         self._list.addWidget(self._add_card)
@@ -288,13 +296,30 @@ class Panel(QWidget):
             go.setVisible(True)
         self.start_requested.emit(name)
 
-    def set_message(self, name: str, on: bool) -> None:
-        """切换这一行左侧的「有新消息」红点(答完一轮/等你);不动运行键文字。"""
+    def _apply_dot(self, name: str) -> None:
         env = self._envs.get(name)
-        if env is not None:
-            env.setStyleSheet("background:#ff4d4f; border-radius:5px;" if on
-                              else "background:transparent;")
-            env.setToolTip("有新消息 · 点这张卡查看并已读" if on else "")
+        if env is None:
+            return
+        lit = name in self._msg_on and self._blink_on   # 有消息且当前在「亮」相位
+        env.setStyleSheet("background:#ff4d4f; border-radius:5px;" if lit
+                          else "background:transparent;")
+
+    def _blink_dots(self) -> None:
+        self._blink_on = not self._blink_on
+        for name in list(self._msg_on):
+            self._apply_dot(name)
+
+    def set_message(self, name: str, on: bool) -> None:
+        """切换这一行左侧的「有新消息」红点(答完一轮/等你);红点会闪烁。不动运行键文字。"""
+        env = self._envs.get(name)
+        if env is None:
+            return
+        if on:
+            self._msg_on.add(name)
+        else:
+            self._msg_on.discard(name)
+        env.setToolTip("有新消息 · 点这张卡查看并已读" if on else "")
+        self._apply_dot(name)
 
     def set_run_state(self, name: str, state: str) -> None:
         """state ∈ {down(未运行), launching(启动中), running(运行中)}。
