@@ -67,24 +67,33 @@ def main() -> int:
     # 期间卡片显示「启动中」给反馈;窗口一抓到就转「运行中」。
     launching: dict[str, int] = {}
     last_order: list[str] = []
-    # 托盘闪烁:只要有成员「该你看了」(答完一轮/等权限)就闪
-    blink_state = {"pending": False, "on": False}
+    blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
+    cur_pending: set[str] = set()       # 当前「该你看了」的成员(tick 刷新)
+    acked: set[str] = set()             # 已确认过闪烁的成员:列表仍标待处理,只是不再闪
     # 「该你看了」队列:成员答完一轮按先后入队,顺序处理(弹一个,处理掉再弹下一个)
     pending_queue: list[str] = []
     shown_front = {"name": None}        # 当前已最大化到前台的队首
+
+    def _ack_blink() -> None:
+        """你已经在看了(点了托盘图标 / 点了某张卡)→ 当前 pending 全部标为已确认,
+        托盘停闪;但列表里仍保留「待处理」高亮,直到逐个点掉。新 pending 会重新闪。"""
+        acked.update(cur_pending)
 
     def _live_hwnd(name: str) -> int | None:
         h = hwnds.get(name)
         return h if (h and winman.is_window(h)) else None
 
     def _state_of(name: str) -> str:
-        if _live_hwnd(name) is not None:
+        live = _live_hwnd(name) is not None
+        if live and name in cur_pending:    # 答完一轮/等权限 且窗口在 → 待处理
+            return "attention"
+        if live:
             return "running"
         if name in launching:
             return "launching"
         return "down"
 
-    _RANK = {"running": 0, "launching": 1, "down": 2}
+    _RANK = {"attention": 0, "running": 1, "launching": 2, "down": 3}
 
     def _refresh_states() -> None:
         """刷新每张卡的明暗/运行键,并把运行中/启动中的卡排到前面。"""
@@ -142,9 +151,11 @@ def main() -> int:
                 cc_signals.clear_turn_ended(rec["session_id"])
 
     def on_row_click(name: str) -> None:
-        """点成员横条:已运行 → 置前 + 标记已读(停闪/出队);未运行/启动中无反应。"""
+        """点成员横条:已运行 → 置前 + 标记已读(清该成员 turn-ended,出队);
+        同时确认闪烁(托盘停闪)。未运行/启动中无反应。"""
         h = _live_hwnd(name)
         if h is not None:
+            _ack_blink()                    # 点了列表 → 停闪
             winman.bring_to_front(h)
             _dismiss(name)
 
@@ -237,7 +248,9 @@ def main() -> int:
         pending = match_pending(
             cc_signals.read_turn_ended_full() + cc_signals.read_pending_full(),
             members)
-        blink_state["pending"] = bool(pending)
+        cur_pending.clear()
+        cur_pending.update(pending)
+        acked.intersection_update(pending)  # 不再 pending 的从已确认里移除 → 再来会重新闪
         # 维护队列:新「该你看了」的按成员序入队,已处理(不再 pending)的出队
         for m in members:
             if m.name in pending and m.name not in pending_queue:
@@ -279,19 +292,22 @@ def main() -> int:
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)
     tray.setToolTip("Claude 驾驶舱")
-    # 左键/双击托盘图标 → 还原面板(尤其方便点掉正在闪的提醒)
-    tray.activated.connect(
-        lambda r: _restore_panel()
+    # 左键/双击托盘图标 → 还原面板 + 停闪(你已经在看了;待处理高亮仍留在列表)
+    def _on_tray_activated(r) -> None:
         if r in (QSystemTrayIcon.ActivationReason.Trigger,
-                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
+                 QSystemTrayIcon.ActivationReason.DoubleClick):
+            _ack_blink()
+            _restore_panel()
+
+    tray.activated.connect(_on_tray_activated)
     tray.show()
 
-    # 闪烁:只要有成员「该你看了」(答完一轮/等权限)→ 托盘图标在 图标/空 间交替。
-    # 与最大化弹窗相伴;处理完(回话/点横条已读)pending 清空就停闪复位。
+    # 闪烁:有「该你看了」且尚未确认(未点托盘/未点卡)→ 托盘图标在 图标/空 间交替。
+    # 点了托盘或某张卡 → 确认停闪(列表仍标待处理);处理掉或新成员答完会再变。
     _empty_icon = QIcon()
 
     def _blink_tick() -> None:
-        if not blink_state["pending"]:
+        if not (cur_pending - acked):       # 没有「未确认的待处理」→ 复位
             if blink_state["on"]:
                 blink_state["on"] = False
             tray.setIcon(icon)
