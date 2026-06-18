@@ -124,7 +124,7 @@ class Panel(QWidget):
     def __init__(self, members):
         super().__init__()
         self.setObjectName("panel")
-        self.setWindowTitle("Claude 驾驶舱")
+        self.setWindowTitle("Claude 花名册")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)  # 不给最大化
         self.setStyleSheet(_QSS)
@@ -148,9 +148,9 @@ class Panel(QWidget):
         # 头部:标题 + 副标题(添加按钮已移到列表底部)
         titles = QVBoxLayout()
         titles.setSpacing(1)
-        t = QLabel("Claude 驾驶舱")
+        t = QLabel("Claude 花名册")
         t.setObjectName("title")
-        sub = QLabel("点「启动」开 · 答完亮红点+闪烁 · 点横条=最大化/已读")
+        sub = QLabel("点「启动」开 · 答完亮信封+闪烁 · 点横条=该窗最大化/其余最小化")
         sub.setObjectName("subtitle")
         titles.addWidget(t)
         titles.addWidget(sub)
