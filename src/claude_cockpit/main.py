@@ -236,9 +236,25 @@ def main() -> int:
             store.save(hwnds)
         _persist_and_rebuild()
 
+    def on_open_dir(name: str) -> None:
+        """右键「打开目录」:用资源管理器打开该成员的 cwd(项目根目录)。"""
+        m = by_name.get(name)
+        if m is None:
+            return
+        p = Path(m.cwd)
+        if not p.is_dir():
+            QMessageBox.warning(panel, "打不开目录", f"目录不存在:\n{p}")
+            return
+        try:
+            import os
+            os.startfile(str(p))            # Windows:用资源管理器打开文件夹
+        except Exception as e:
+            QMessageBox.warning(panel, "打不开目录", str(e))
+
     panel.add_requested.connect(on_add)
     panel.edit_requested.connect(on_edit)
     panel.delete_requested.connect(on_delete)
+    panel.open_dir_requested.connect(on_open_dir)
 
     def tick() -> None:
         # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄

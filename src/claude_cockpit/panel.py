@@ -6,7 +6,7 @@
 对外接口(main 依赖):
   Panel(members) / set_run_state(name,state) / set_order(names) / rebuild(members)
   信号:member_clicked(str)、start_requested(str)、add_requested()、
-        edit_requested(str)、delete_requested(str)
+        edit_requested(str)、delete_requested(str)、open_dir_requested(str)
 """
 from __future__ import annotations
 
@@ -75,6 +75,7 @@ class _Card(QFrame):
     clicked = Signal()
     edit = Signal()
     delete = Signal()
+    open_dir = Signal()
 
     def __init__(self):
         super().__init__()
@@ -90,6 +91,7 @@ class _Card(QFrame):
 
     def contextMenuEvent(self, e):
         menu = QMenu(self)
+        menu.addAction("打开目录", self.open_dir.emit)
         menu.addAction("编辑", self.edit.emit)
         menu.addAction("删除", self.delete.emit)
         menu.exec(e.globalPos())
@@ -123,6 +125,7 @@ class Panel(QWidget):
     add_requested = Signal()
     edit_requested = Signal(str)
     delete_requested = Signal(str)
+    open_dir_requested = Signal(str)    # 右键「打开目录」:用资源管理器开成员 cwd
 
     def __init__(self, members):
         super().__init__()
@@ -181,6 +184,7 @@ class Panel(QWidget):
         card.clicked.connect(lambda n=m.name: self.member_clicked.emit(n))
         card.edit.connect(lambda n=m.name: self.edit_requested.emit(n))
         card.delete.connect(lambda n=m.name: self.delete_requested.emit(n))
+        card.open_dir.connect(lambda n=m.name: self.open_dir_requested.emit(n))
         lay = QHBoxLayout(card)
         lay.setContentsMargins(0, 0, 10, 0)
         lay.setSpacing(10)
