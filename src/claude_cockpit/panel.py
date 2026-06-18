@@ -28,7 +28,7 @@ QLabel#title { color:#eaecef; font-size:14px; font-weight:700; }
 QLabel#subtitle { color:#6e7682; font-size:11px; }
 QFrame#card { background:#22252d; border-radius:10px; }
 QFrame#card:hover { background:#2b2f3a; }
-QLabel#env { color:#e0a72e; font-size:19px; background:transparent; }
+QLabel#env { background:transparent; }
 QFrame#addcard {
     background:transparent; border:1px dashed #3a3f4b; border-radius:10px;
 }
@@ -148,7 +148,7 @@ class Panel(QWidget):
         titles.setSpacing(1)
         t = QLabel("Claude 驾驶舱")
         t.setObjectName("title")
-        sub = QLabel("点「启动」开 · 答完亮✉+闪烁 · 点横条=最大化/已读")
+        sub = QLabel("点「启动」开 · 答完亮红点+闪烁 · 点横条=最大化/已读")
         sub.setObjectName("subtitle")
         titles.addWidget(t)
         titles.addWidget(sub)
@@ -179,18 +179,17 @@ class Panel(QWidget):
         accent.setStyleSheet(f"background:{m.color}; border-radius:2px;")
         lay.addWidget(accent)
 
+        # 「有新消息」红点角标:靠左(名字前),始终占位 10px,只切红/透明,名字不抖
+        env = QLabel()
+        env.setObjectName("env")
+        env.setFixedSize(10, 10)
+        lay.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._envs[m.name] = env
+
         name = QLabel(f"{m.emoji}  @{m.name}")
         name.setObjectName("name")
         name.setStyleSheet(f"color:{m.color};")
         lay.addWidget(name, 1)
-
-        # 「有新消息」小信封:始终占位(固定宽),只切换 ✉/空,免得右侧胶囊忽左忽右
-        env = QLabel("")
-        env.setObjectName("env")
-        env.setFixedWidth(24)
-        env.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._envs[m.name] = env
 
         go = QPushButton("启动")
         go.setObjectName("go")
@@ -290,10 +289,11 @@ class Panel(QWidget):
         self.start_requested.emit(name)
 
     def set_message(self, name: str, on: bool) -> None:
-        """切换这一行的「有新消息」小信封(答完一轮/等你);不动运行键文字。"""
+        """切换这一行左侧的「有新消息」红点(答完一轮/等你);不动运行键文字。"""
         env = self._envs.get(name)
         if env is not None:
-            env.setText("✉" if on else "")
+            env.setStyleSheet("background:#ff4d4f; border-radius:5px;" if on
+                              else "background:transparent;")
             env.setToolTip("有新消息 · 点这张卡查看并已读" if on else "")
 
     def set_run_state(self, name: str, state: str) -> None:
