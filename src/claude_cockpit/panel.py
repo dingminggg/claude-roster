@@ -186,17 +186,19 @@ class Panel(QWidget):
         accent.setStyleSheet(f"background:{m.color}; border-radius:2px;")
         lay.addWidget(accent)
 
-        # 「有新消息」红点角标:靠左(名字前),始终占位 10px,只切红/透明,名字不抖
+        name = QLabel(f"{m.emoji}  @{m.name}")
+        name.setObjectName("name")
+        name.setStyleSheet(f"color:{m.color};")
+        lay.addWidget(name, 0)
+
+        # 「有新消息」红点角标:紧跟名字后面,始终占位 10px,只切红/透明
         env = QLabel()
         env.setObjectName("env")
         env.setFixedSize(10, 10)
         lay.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
         self._envs[m.name] = env
 
-        name = QLabel(f"{m.emoji}  @{m.name}")
-        name.setObjectName("name")
-        name.setStyleSheet(f"color:{m.color};")
-        lay.addWidget(name, 1)
+        lay.addStretch(1)                       # 弹簧把运行键顶到最右
 
         go = QPushButton("启动")
         go.setObjectName("go")
