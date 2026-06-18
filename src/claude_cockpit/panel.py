@@ -125,8 +125,9 @@ class Panel(QWidget):
         self.setObjectName("panel")
         self.setWindowTitle("Claude 驾驶舱")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)  # 不给最大化
         self.setStyleSheet(_QSS)
-        self.setMinimumWidth(248)
+        self.setFixedWidth(360)             # 固定宽度,只允许竖向随成员数伸缩
         if ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(ICON_PATH)))
 
