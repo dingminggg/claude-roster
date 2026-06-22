@@ -1,5 +1,11 @@
 # claude-cockpit 成员清单(由面板自动写回)
 agents:
+- name: Roster
+  cwd: C:\Users\LQ\PhpstormProjects\claude-cockpit
+  emoji: 🕹️
+  color: '#3b82f6'
+  permission_mode: default
+  model: opus
 - name: fad
   cwd: C:\Users\LQ\PhpstormProjects\fad-backend
   emoji: 🏪
@@ -15,11 +21,6 @@ agents:
   emoji: 🏬
   color: '#93aba6'
   permission_mode: default
-- name: driver
-  cwd: C:\Users\LQ\PhpstormProjects\foodsup-driver
-  emoji: 🚚
-  color: '#2ecc71'
-  permission_mode: acceptEdits
 - name: customer
   cwd: C:\Users\LQ\PhpstormProjects\foodsup-client
   emoji: 🙋
@@ -31,3 +32,18 @@ agents:
   color: '#3b82f6'
   permission_mode: default
   model: opus
+- name: driver
+  cwd: C:\Users\LQ\PhpstormProjects\foodsup-driver
+  emoji: 🚚
+  color: '#2ecc71'
+  permission_mode: acceptEdits
+- name: driver-web
+  cwd: C:\Users\LQ\PhpstormProjects\foodsup-driver-web
+  emoji: 🚑
+  color: '#3b82f6'
+  permission_mode: default
+- name: one-time
+  cwd: C:\Users\LQ\PhpstormProjects\one-time-test
+  emoji: 🤖
+  color: '#3b82f6'
+  permission_mode: default

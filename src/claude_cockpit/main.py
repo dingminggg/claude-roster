@@ -70,6 +70,9 @@ def main() -> int:
     blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
     cur_pending: set[str] = set()       # 当前「该你看了」的成员(tick 刷新)
     acked: set[str] = set()             # 已确认过闪烁的成员:列表仍标待处理,只是不再闪
+    # 信封「逐个点掉」:点过某张卡 → 它的 ✉ 停闪(本地标记,不删信号文件,
+    # 故权限 pending 仍留给小青蛙/真去答时清)。成员离开 pending 后自动复位 → 再来重新闪。
+    card_read: set[str] = set()
 
     def _ack_blink() -> None:
         """你已经在看了(点了托盘图标 / 点了某张卡)→ 当前 pending 全部标为已确认,
@@ -96,9 +99,11 @@ def main() -> int:
         states = {m.name: _state_of(m.name) for m in members}
         for m in members:
             panel.set_run_state(m.name, states[m.name])
-            # 有新消息小信封:窗口还在 且 答完一轮/等你
+            # 有新消息小信封:窗口还在 且 答完一轮/等你 且 这张卡还没被点掉
             panel.set_message(m.name,
-                              states[m.name] == "running" and m.name in cur_pending)
+                              states[m.name] == "running"
+                              and m.name in cur_pending
+                              and m.name not in card_read)
         order = sorted(states, key=lambda n: (_RANK[states[n]], pos[n]))
         if order != last_order:
             panel.set_order(order)
@@ -153,7 +158,8 @@ def main() -> int:
         + 确认闪烁(托盘停闪)。未运行/启动中无反应。"""
         h = _live_hwnd(name)
         if h is not None:
-            _ack_blink()                    # 点了列表 → 停闪
+            _ack_blink()                    # 点了列表 → 托盘停闪
+            card_read.add(name)             # 这张卡的 ✉ 也停闪(权限 pending 不删文件,仅本地已读)
             for other in members:           # 只碰缓存里且还活着的句柄,绝不 launch
                 if other.name == name:
                     continue
@@ -162,6 +168,7 @@ def main() -> int:
                     winman.minimize(oh)
             winman.maximize(h)              # 点谁就把谁最大化(不再自动弹)
             _dismiss(name)
+            _refresh_states()               # 立刻让信封消失,不等下一个 tick(~1s)
 
     def on_start(name: str) -> None:
         """面板里点「启动」→「确定」后发来:拉起控制台(已运行/启动中忽略)。
@@ -271,6 +278,7 @@ def main() -> int:
         cur_pending.clear()
         cur_pending.update(pending)
         acked.intersection_update(pending)  # 不再 pending 的从已确认里移除 → 再来会重新闪
+        card_read.intersection_update(pending)  # 同理:答完/清掉后复位,新一轮 pending 重新闪
         # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
         _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
         # 名字下面那行:用缓存的活句柄直接读控制台标题(claude 起来后会改成它的状态)
