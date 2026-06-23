@@ -91,3 +91,25 @@ def test_list_sessions_sorted_by_mtime_desc_and_limited(tmp_path):
 def test_list_sessions_missing_dir_returns_empty(tmp_path):
     assert sessions.list_sessions("x", projects_root=tmp_path,
                                   _dirname="nope") == []
+
+
+def test_delete_session_removes_file(tmp_path):
+    d = tmp_path / "C--proj"
+    d.mkdir()
+    (d / "gone.jsonl").write_text("{}", encoding="utf-8")
+    assert sessions.delete_session("x", "gone", projects_root=tmp_path,
+                                   _dirname="C--proj") is True
+    assert not (d / "gone.jsonl").exists()
+
+
+def test_delete_session_missing_returns_false(tmp_path):
+    d = tmp_path / "C--proj"
+    d.mkdir()
+    assert sessions.delete_session("x", "nope", projects_root=tmp_path,
+                                   _dirname="C--proj") is False
+
+
+def test_fmt_mtime_month_day():
+    import datetime as _dt
+    ts = _dt.datetime(2026, 6, 18, 9, 30).timestamp()
+    assert sessions.fmt_mtime(ts) == "06-18"

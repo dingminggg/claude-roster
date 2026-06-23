@@ -91,3 +91,18 @@ def list_sessions(cwd, limit: int = 12, projects_root=None,
         out.append(Session(id=f.stem, title=_parse_title(f), mtime=mtime))
     out.sort(key=lambda s: s.mtime, reverse=True)
     return out[:limit]
+
+
+def delete_session(cwd, session_id: str, projects_root=None,
+                   _dirname: str | None = None) -> bool:
+    """删除某会话的 .jsonl 文件;成功 True,文件不存在/失败 False。"""
+    f = _sessions_dir(cwd, projects_root, _dirname) / f"{session_id}.jsonl"
+    try:
+        f.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def fmt_mtime(mtime: float) -> str:
+    return datetime.fromtimestamp(mtime).strftime("%m-%d")
