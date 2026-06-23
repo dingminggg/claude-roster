@@ -12,11 +12,17 @@ from PySide6.QtWidgets import (
     QApplication, QMenu, QMessageBox, QSystemTrayIcon,
 )
 
-from . import cc_signals, dialogs, sessions, store, winman
+from . import cc_signals, dialogs, sessions, settings, sound, store, winman
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
 from .matching import match_pending, norm_path
 from .panel import ICON_PATH, Panel
+
+
+def newly_pending(prev: set[str], cur: set[str]) -> set[str]:
+    """这一轮「新进入有消息」的成员 = 现在 pending 里、上一轮还不在的。
+    方向固定 cur - prev(从 pending 消失的不算新);用于决定是否响一声提示音。"""
+    return cur - prev
 
 
 def _config_path() -> Path:
@@ -74,6 +80,11 @@ def main() -> int:
     # 信封「逐个点掉」:点过某张卡 → 它的 ✉ 停闪(本地标记,不删信号文件,
     # 故权限 pending 仍留给小青蛙/真去答时清)。成员离开 pending 后自动复位 → 再来重新闪。
     card_read: set[str] = set()
+
+    # 提示音:有新成员进入 pending 就响一声。prev_pending 记上一轮 pending,
+    # None 表示首个 tick → 只播种不响(避免开机时对遗留 pending 一通叫)。
+    sound_enabled = settings.load().get("sound_enabled", True)
+    prev_pending: set[str] | None = None
 
     def _ack_blink() -> None:
         """你已经在看了(点了托盘图标 / 点了某张卡)→ 当前 pending 全部标为已确认,
@@ -302,6 +313,13 @@ def main() -> int:
         pending = match_pending(
             cc_signals.read_turn_ended_full() + cc_signals.read_pending_full(),
             members)
+        # 提示音:有成员「新进入」pending 就响一声(与信封/托盘开始闪同一时刻)。
+        # 首个 tick 只播种 prev_pending 不响,避免开机时对遗留 pending 一通叫。
+        nonlocal prev_pending
+        if prev_pending is not None:
+            if sound_enabled and newly_pending(prev_pending, pending):
+                sound.play()
+        prev_pending = set(pending)
         cur_pending.clear()
         cur_pending.update(pending)
         acked.intersection_update(pending)  # 不再 pending 的从已确认里移除 → 再来会重新闪
@@ -332,11 +350,23 @@ def main() -> int:
     def _panel_away() -> bool:
         return panel.isHidden() or panel.isMinimized()
 
-    # 托盘:显隐面板 / 退出(用多只小青蛙图标)
+    # 托盘:显隐面板 / 提示音开关 / 退出(用多只小青蛙图标)
     tray = QSystemTrayIcon(icon, app)
     menu = QMenu()
     menu.addAction("显示/隐藏面板",
                    lambda: panel.hide() if not _panel_away() else _restore_panel())
+
+    def _toggle_sound(checked: bool) -> None:
+        """勾选/取消「提示音」→ 改运行时开关 + 存盘。"""
+        nonlocal sound_enabled
+        sound_enabled = checked
+        settings.save({"sound_enabled": checked})
+
+    sound_action = menu.addAction("提示音")
+    sound_action.setCheckable(True)
+    sound_action.setChecked(sound_enabled)
+    sound_action.toggled.connect(_toggle_sound)
+
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)
     tray.setToolTip("Claude 驾驶舱")
