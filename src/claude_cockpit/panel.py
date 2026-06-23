@@ -263,11 +263,12 @@ class _SessionPicker(QWidget):
 
 class Panel(QWidget):
     member_clicked = Signal(str)    # 点整条横条:仅运行后置前
-    start_requested = Signal(str)   # 点「启动」键:拉起控制台
+    start_requested = Signal(str, object)   # (name, session_id|None):点「确定」后拉起
     add_requested = Signal()
     edit_requested = Signal(str)
     delete_requested = Signal(str)
     open_dir_requested = Signal(str)    # 右键「打开目录」:用资源管理器开成员 cwd
+    delete_session_requested = Signal(str, str)  # (name, session_id):删该成员某会话记录
 
     def __init__(self, members):
         super().__init__()
@@ -284,6 +285,7 @@ class Panel(QWidget):
         self._envs: dict[str, QLabel] = {}     # 每行的「有新消息」小信封
         self._ctitles: dict[str, QLabel] = {}  # 名字下面那行:成员会话的实时窗口标题
         self._ctitle_raw: dict[str, str] = {}  # 标题原文(用于宽度变化时重新省略)
+        self._pickers: dict[str, "_SessionPicker"] = {}  # 未运行成员的会话下拉
         self._effects: dict[str, QGraphicsOpacityEffect] = {}
         self._cards: dict[str, _Card] = {}
         self._confirm_boxes: dict[str, QWidget] = {}   # 内联「确定/取消」条
@@ -333,7 +335,7 @@ class Panel(QWidget):
 
         accent = QFrame()
         accent.setFixedWidth(4)
-        accent.setMinimumHeight(40)
+        accent.setMinimumHeight(46)
         accent.setStyleSheet(f"background:{m.color}; border-radius:2px;")
         lay.addWidget(accent)
 
@@ -367,6 +369,13 @@ class Panel(QWidget):
         ctitle.setVisible(False)
         col.addWidget(ctitle)
         self._ctitles[m.name] = ctitle
+
+        # 同一行位:未运行显示会话下拉(选要续的会话),运行中让位给上面的实时标题
+        picker = _SessionPicker()
+        picker.delete_requested.connect(
+            lambda sid, n=m.name: self.delete_session_requested.emit(n, sid))
+        col.addWidget(picker)
+        self._pickers[m.name] = picker
 
         lay.addLayout(col, 1)                   # 这一列吃掉中间空间,把运行键顶到最右
 
@@ -421,6 +430,7 @@ class Panel(QWidget):
         self._envs.clear()
         self._ctitles.clear()
         self._ctitle_raw.clear()
+        self._pickers.clear()
         self._effects.clear()
         self._cards.clear()
         self._confirm_boxes.clear()
@@ -460,7 +470,7 @@ class Panel(QWidget):
         self.set_run_state(name, "down")
 
     def _confirm_yes(self, name: str) -> None:
-        """确定 → 收起确认条,走启动流程。"""
+        """确定 → 收起确认条,按下拉选中的会话走启动流程。"""
         self._confirming.discard(name)
         box = self._confirm_boxes.get(name)
         if box is not None:
@@ -468,7 +478,9 @@ class Panel(QWidget):
         go = self._gos.get(name)
         if go is not None:
             go.setVisible(True)
-        self.start_requested.emit(name)
+        picker = self._pickers.get(name)
+        sid = picker.selected_id() if picker is not None else None
+        self.start_requested.emit(name, sid)
 
     def _apply_dot(self, name: str) -> None:
         env = self._envs.get(name)
@@ -513,6 +525,12 @@ class Panel(QWidget):
         lbl.setToolTip(text)
         lbl.setVisible(True)
 
+    def set_sessions(self, name: str, sessions) -> None:
+        """给某成员的会话下拉灌数据(列表已按最近活跃倒序);默认选最近一条/无则新会话。"""
+        p = self._pickers.get(name)
+        if p is not None:
+            p.set_sessions(sessions)
+
     def set_run_state(self, name: str, state: str) -> None:
         """state ∈ {down(未运行), launching(启动中), running(运行中)}。
         控制整卡明暗 + 右侧运行键的文字/样式;确认态优先(显示确定/取消)。"""
@@ -530,6 +548,14 @@ class Panel(QWidget):
         eff = self._effects.get(name)
         if eff is not None:                     # 确认中也点亮;纯未运行才置灰
             eff.setOpacity(_DIM if (state == "down" and not confirming) else 1.0)
+
+        picker = self._pickers.get(name)
+        if picker is not None:
+            picker.setVisible(state == "down")
+        if state == "down":
+            ctitle = self._ctitles.get(name)
+            if ctitle is not None:
+                ctitle.setVisible(False)
 
         go = self._gos.get(name)
         if go is None:
