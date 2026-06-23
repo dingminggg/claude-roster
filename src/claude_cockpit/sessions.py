@@ -1,8 +1,9 @@
 """Claude CLI 会话发现:列出某成员 cwd 下的历史会话(id/标题/最后活跃),并可删除。
 
-会话存于 ~/.claude/projects/<编码cwd>/<session-uuid>.jsonl。标题取该文件内最后一条
-type=="ai-title" 的 aiTitle(Claude Code 自动生成的人类可读标题);没有则退回首条用户
-消息截断;再没有为空(调用方显示「(无标题)」)。纯逻辑、无 Qt,便于测试。
+会话存于 ~/.claude/projects/<编码cwd>/<session-uuid>.jsonl。标题与 /resume 选择器对齐,
+优先级:最后一条 custom-title(用户 /rename 设的)→ 最后一条 ai-title(Claude Code 自动
+生成)→ 首条「真实」用户消息(跳过 isMeta 及 <system-reminder>/<command-…> 等注入文本,
+截断)→ 为空(调用方显示「(无标题)」)。纯逻辑、无 Qt,便于测试。
 """
 from __future__ import annotations
 
@@ -42,8 +43,13 @@ def _user_text(obj: dict) -> str | None:
     return None
 
 
+# 回退取首条用户消息时,跳过这些「非人类输入」的注入文本(与 /resume 一致)
+_META_PREFIXES = ("<system-reminder", "<command-", "<local-command", "Caveat:")
+
+
 def _parse_title(jsonl_path: Path, max_len: int = 40) -> str:
-    title = None
+    custom = None
+    ai = None
     first_user = None
     try:
         with open(jsonl_path, encoding="utf-8") as f:
@@ -56,16 +62,24 @@ def _parse_title(jsonl_path: Path, max_len: int = 40) -> str:
                 except Exception:
                     continue
                 t = obj.get("type")
-                if t == "ai-title":
+                if t == "custom-title":
+                    ct = obj.get("customTitle")
+                    if ct:
+                        custom = ct         # 取最后一条
+                elif t == "ai-title":
                     at = obj.get("aiTitle")
                     if at:
-                        title = at          # 取最后一条
-                elif t == "user" and first_user is None:
-                    first_user = _user_text(obj)
+                        ai = at             # 取最后一条
+                elif t == "user" and first_user is None and not obj.get("isMeta"):
+                    tx = _user_text(obj)
+                    if tx and not tx.lstrip().startswith(_META_PREFIXES):
+                        first_user = tx
     except OSError:
         return ""
-    if title:
-        return title
+    if custom:
+        return custom
+    if ai:
+        return ai
     if first_user:
         return first_user[:max_len]
     return ""

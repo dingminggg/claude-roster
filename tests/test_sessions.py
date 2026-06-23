@@ -58,6 +58,34 @@ def test_list_sessions_user_content_as_blocks(tmp_path):
     assert out[0].title == "块状文本消息"
 
 
+def test_list_sessions_custom_title_beats_ai_title(tmp_path):
+    # /rename 设的 custom-title 优先级高于 ai-title(与 /resume 一致)
+    d = tmp_path / "C--proj"
+    d.mkdir()
+    _write_jsonl(d / "s6.jsonl", [
+        {"type": "ai-title", "aiTitle": "自动标题"},
+        {"type": "custom-title", "customTitle": "123123"},
+    ])
+    out = sessions.list_sessions("x", projects_root=tmp_path, _dirname="C--proj")
+    assert out[0].title == "123123"
+
+
+def test_list_sessions_skips_meta_user_messages(tmp_path):
+    # 无 ai-title/custom-title 时,回退要跳过 isMeta 和 <system-reminder>/命令 等注入文本,
+    # 取第一条真实用户消息(与 /resume 一致)
+    d = tmp_path / "C--proj"
+    d.mkdir()
+    _write_jsonl(d / "s7.jsonl", [
+        {"type": "user", "isMeta": True,
+         "message": {"content": '<system-reminder> The user named this session "x"'}},
+        {"type": "user",
+         "message": {"content": [{"type": "text", "text": "<command-name>/clear</command-name>"}]}},
+        {"type": "user", "message": {"content": "这才是我真正问的第一句"}},
+    ])
+    out = sessions.list_sessions("x", projects_root=tmp_path, _dirname="C--proj")
+    assert out[0].title == "这才是我真正问的第一句"
+
+
 def test_list_sessions_empty_title_when_no_title_no_user(tmp_path):
     d = tmp_path / "C--proj"
     d.mkdir()
