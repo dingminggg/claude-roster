@@ -1,9 +1,8 @@
-# 复制自 desk-buddy(src/desk_buddy/cc_signals.py),与桌宠共享同一 pending 目录。
-"""文件信号：Claude Code hook 与桌宠/驾驶舱之间的「在等权限确认」通路。
+"""文件信号:Claude Code hook 与驾驶舱之间的两条独立通路(权限 pending / 答完一轮)。
 
-约定目录 ~/.claude/data/desk-buddy/pending/ 下，每个等待确认的会话一个
-<session_id>.json。写入原子（tempfile + os.replace），读取对缺失/损坏文件
-容错。claude-cockpit 读这个目录,与 desk-buddy 共用同一套 hook 信号。
+均在 ~/.claude/data/claude-cockpit/ 下:pending/(每个等权限确认的会话一个
+<session_id>.json)、turn-ended/(答完一轮)。写入原子(tempfile + os.replace),
+读取对缺失/损坏文件容错。本项目自带这套信号,不再依赖 desk-buddy(已解耦)。
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from pathlib import Path
 
 
 def data_dir() -> Path:
-    return Path.home() / ".claude" / "data" / "desk-buddy"
+    return Path.home() / ".claude" / "data" / "claude-cockpit"
 
 
 def pending_dir() -> Path:
@@ -135,15 +134,10 @@ def prune_stale(max_age_seconds: int = 600) -> None:
     _prune(pending_dir(), max_age_seconds)
 
 
-# ── 驾驶舱专属信号:成员「答完一轮」(Stop hook 写入)。──
-# 与桌宠共享的「权限 pending」分开放在另一个目录,免得桌宠对每一轮结束都唠叨。
-# 只有 claude-cockpit 读 turn-ended/;桌宠完全不碰,行为不变。
-def cockpit_data_dir() -> Path:
-    return Path.home() / ".claude" / "data" / "claude-cockpit"
-
-
+# ── 「答完一轮」信号:成员答完一轮(Stop hook 写入)。──
+# 与「权限 pending」分两个目录,语义独立:pending=在等你确认,turn-ended=答完该你看了。
 def turn_dir() -> Path:
-    return cockpit_data_dir() / "turn-ended"
+    return data_dir() / "turn-ended"
 
 
 def write_turn_ended(session_id: str, message: str = "", cwd: str = "") -> None:

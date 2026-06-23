@@ -1,8 +1,8 @@
-"""Stop hook:Claude 答完一轮 → 记一笔「该你看了」到驾驶舱专属信号目录。
+"""Stop hook:Claude 答完一轮 → 记一笔「该你看了」到 turn-ended/,并顺手清掉该会话的
+权限 pending(答完即不再等你确认)。
 
 被 Claude Code 以 `python -m claude_cockpit.hooks.turn_ended` 拉起,hook 负载
-JSON 从 stdin 读入。写到 turn-ended/(桌宠不读),所以只有驾驶舱会因此
-最大化窗口 + 闪托盘;桌宠仍只管权限提醒。异常一律吞掉返回 0,绝不阻断 Claude。
+JSON 从 stdin 读入。异常一律吞掉返回 0,绝不阻断 Claude。
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ def handle(payload: dict) -> None:
     cwd = payload.get("cwd", "") or ""
     if session_id:
         cc_signals.write_turn_ended(session_id, "", cwd)
+        cc_signals.clear_pending(session_id)    # 答完即不再等权限确认
 
 
 def main() -> int:
