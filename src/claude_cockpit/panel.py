@@ -4,9 +4,11 @@
 运行中的成员排在最前、整卡点亮;未运行的置灰排后。
 
 对外接口(main 依赖):
-  Panel(members) / set_run_state(name,state) / set_order(names) / rebuild(members)
-  信号:member_clicked(str)、start_requested(str)、add_requested()、
-        edit_requested(str)、delete_requested(str)、open_dir_requested(str)
+  Panel(members) / set_run_state(name,state) / set_sessions(name,sessions) /
+  set_order(names) / rebuild(members)
+  信号:member_clicked(str)、start_requested(str, object)、add_requested()、
+        edit_requested(str)、delete_requested(str)、open_dir_requested(str)、
+        delete_session_requested(str, str)
 """
 from __future__ import annotations
 
