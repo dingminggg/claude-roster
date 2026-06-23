@@ -33,17 +33,19 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 
 ## 信号双通道(关键设计,别搞混)
 
+两条通道都在 `~/.claude/data/claude-cockpit/` 下,**都由本项目自己的 hook 读写**(已和小青蛙解耦):
+
 | 通道 | 目录 | 写 | 清 | 谁读 |
 |---|---|---|---|---|
-| 权限确认 | `~/.claude/data/desk-buddy/pending/` | Notification hook(消息含 "permission") | Stop / UserPromptSubmit | **小青蛙 + 驾驶舱** |
-| 答完一轮 | `~/.claude/data/claude-cockpit/turn-ended/` | **本项目** Stop hook | UserPromptSubmit / 点卡已读 / 超时 prune | **只有驾驶舱** |
+| 权限确认 | `~/.claude/data/claude-cockpit/pending/` | Notification hook(消息含 "permission") | Stop / UserPromptSubmit | **只有驾驶舱** |
+| 答完一轮 | `~/.claude/data/claude-cockpit/turn-ended/` | Stop hook | UserPromptSubmit / 点卡已读 / 超时 prune | **只有驾驶舱** |
 
-> 「答完一轮」单开一条目录,就是为了**不让小青蛙对每轮结束都唠叨**——小青蛙永远只管权限。改信号逻辑时务必保持这一点。
+> 两通道语义不同:pending=在等你确认权限(Notification 写),turn-ended=答完该你看了(Stop 写)。分开放是因为生命周期/清除时机不同。两者驾驶舱都当「有消息」(信封+托盘闪+提示音)。
 
-`~/.claude/settings.json` 里已挂(用 cockpit venv 的 python):
-- **Stop** → `desk_buddy.hooks.clear`(清权限)+ `claude_cockpit.hooks.turn_ended`(写答完)
-- **UserPromptSubmit** → `desk_buddy.hooks.clear` + `claude_cockpit.hooks.clear`
-- **Notification** → `desk_buddy.hooks.notify`
+`~/.claude/settings.json` 里已挂(全部用 cockpit venv 的 python,**不再引用 desk_buddy**):
+- **Stop** → `claude_cockpit.hooks.turn_ended`(写答完 + 顺手清 pending)
+- **UserPromptSubmit** → `claude_cockpit.hooks.clear`(清 turn-ended + 清 pending)
+- **Notification** → `claude_cockpit.hooks.notify`(消息含 "permission" 时写 pending)
 
 ## 当前交互行为
 
@@ -60,7 +62,7 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 1. **绝不批量/齐发启动 claude** —— 同时拉起多个交互式 claude 会**挤崩共享的 Claude Code daemon**,导致「团灭」(所有窗口一起关)。所以**没有「全部启动」按钮**,只能单个、由用户按节奏启动。
 2. **句柄在出生时抓、之后只认句柄**:窗口标题先被设成 `CCKPT:<name>`,claude 起来后会改标题;务必趁改名前用 `wait_for_title` 抓到 HWND 缓存。之后所有「窗口还在吗」一律用 `IsWindow(hwnd)`(配合 `is_console_window`)判断,**不要再查标题**。
 3. **自动动作只碰「缓存里且还活着」的句柄,绝不自动 launch** —— 否则会重复开空白窗口(历史 bug)。
-4. **别破坏小青蛙**:见信号双通道。
+4. **信号通道已自给自足**:pending + turn-ended 两条都由本项目 hook 读写,不再依赖 desk-buddy(小青蛙)。改 hook/信号目录时保持 cockpit 自洽,别又把它接回 desk_buddy。
 5. 无窗启动用 **pythonw.exe**(普通 python.exe 会留个黑框,关掉它会连带杀死 cockpit)。
 
 ## Git
