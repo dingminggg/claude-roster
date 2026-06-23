@@ -42,3 +42,16 @@ def test_build_inner_command_contains_cwd_title_and_claude(tmp_path):
     assert str(tmp_path) in cmd
     assert "claude" in cmd
     assert cmd.startswith("title ")  # 先设标题,供按标题查找
+
+
+def test_build_inner_command_with_resume(tmp_path):
+    m = _m(name="shop", cwd=tmp_path, permission_mode="default")
+    cmd = build_inner_command(m, session_id="abc-123")
+    assert "claude --resume abc-123" in cmd
+
+
+def test_build_inner_command_without_resume_unchanged(tmp_path):
+    m = _m(name="shop", cwd=tmp_path, permission_mode="default")
+    cmd = build_inner_command(m)
+    assert "--resume" not in cmd
+    assert "claude" in cmd

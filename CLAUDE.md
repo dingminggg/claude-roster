@@ -19,7 +19,8 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 ## 源码地图(src/claude_cockpit/)
 
 - **config.py** — `Member` 数据类 + `load_config/save_config/validate_member`;成员清单在 `agents.yaml`(面板增删改会写回)。
-- **launcher.py** — `window_title(m)="CCKPT:<name>"`;`launch(m)` 用 `CREATE_NEW_CONSOLE` + `cmd /k title CCKPT:x & cd /d ... & ping -n 4 ... & claude <flags>`(ping 拖 ~3s,给抓句柄留窗口;**没有 --resume**)。
+- **launcher.py** — `window_title(m)="CCKPT:<name>"`;`launch(m)` 用 `CREATE_NEW_CONSOLE` + `cmd /k title CCKPT:x & cd /d ... & ping -n 4 ... & claude <flags>`(ping 拖 ~3s,给抓句柄留窗口;`--resume` 由面板下拉选会话后经 session_id 传入,不自动)。
+- **sessions.py** — 扫 `~/.claude/projects/<编码cwd>/*.jsonl` 列成员历史会话(id/标题/最后活跃)、删除会话;标题取最后一条 `ai-title`,回退首条用户消息。
 - **winman.py** — Win32(ctypes):`find_by_title / is_window / wait_for_title / is_console_window / bring_to_front / maximize / minimize`。
 - **store.py** — `~/.claude/data/claude-cockpit/handles.json`,缓存 `name -> hwnd`,重启 cockpit 复用还活着的窗口。
 - **cc_signals.py** — 文件信号,**两条独立通道**(见下)。
@@ -49,6 +50,7 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 - **有新消息**(答完一轮/等权限):名字后面一个**白色小信封 ✉ 闪烁**(550ms)+ **托盘图标闪**。
 - **点成员横条**(仅运行中):把它的控制台 **maximize 最大化**弹到眼前 + 标记已读(✉ 消失)+ 停闪。**注意不要用 bring_to_front**——它带 `SW_RESTORE` 会把最大化还原。未运行点横条无反应(只有「启动」键能开)。
 - **托盘闪烁** = `cur_pending - acked` 非空才闪;点托盘图标或点任一卡 → ack 停闪(列表里各自的 ✉ 仍在,逐个点掉);新成员答完会重新闪。
+- **未运行成员**名字下方有个**会话下拉**:默认选中最近一次会话,可点开换/新建/删除(删除二次点确认)。点「启动」→「确定」后按选中项 `claude --resume <id>`(选「新会话」则不带)。运行中该位置换回控制台实时标题。
 - 面板**固定宽 310、无最大化按钮**;单实例(QLocalServer,再启动只把已有面板弹前台);托盘可显隐/退出;深色标题栏(DWM)。
 
 ## 硬约束(踩坑换来的,务必遵守)

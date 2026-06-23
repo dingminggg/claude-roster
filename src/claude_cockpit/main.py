@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QApplication, QMenu, QMessageBox, QSystemTrayIcon,
 )
 
-from . import cc_signals, dialogs, store, winman
+from . import cc_signals, dialogs, sessions, store, winman
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
 from .matching import match_pending, norm_path
@@ -66,6 +66,7 @@ def main() -> int:
     # 正在启动中的成员:name -> 已轮询次数。控制台从点击到出现有 ~3s 空窗,
     # 期间卡片显示「启动中」给反馈;窗口一抓到就转「运行中」。
     launching: dict[str, int] = {}
+    member_states: dict[str, str] = {}      # 上一轮各成员状态,用于「刚回到未运行」时刷下拉
     last_order: list[str] = []
     blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
     cur_pending: set[str] = set()       # 当前「该你看了」的成员(tick 刷新)
@@ -104,15 +105,20 @@ def main() -> int:
                               states[m.name] == "running"
                               and m.name in cur_pending
                               and m.name not in card_read)
+            # 刚回到/初次为「未运行」→ 刷新它的会话下拉(避免每 tick 重扫文件)
+            if states[m.name] == "down" and member_states.get(m.name) != "down":
+                _refresh_sessions(m.name)
+            member_states[m.name] = states[m.name]
         order = sorted(states, key=lambda n: (_RANK[states[n]], pos[n]))
         if order != last_order:
             panel.set_order(order)
             last_order = order
 
-    def start_member(m) -> None:
+    def start_member(m, session_id=None) -> None:
         """启动一个成员的控制台(不阻塞 UI):立刻标记「启动中」,
-        由 _poll_launching 轮询抓窗口句柄(趁 claude 改标题前),抓到再落盘并置前。"""
-        launch(m)
+        由 _poll_launching 轮询抓窗口句柄(趁 claude 改标题前),抓到再落盘并置前。
+        session_id 非空 → 续接用户在下拉里选的那条会话。"""
+        launch(m, session_id)
         launching[m.name] = 0
         _refresh_states()                   # 立刻给「启动中」反馈
 
@@ -170,14 +176,33 @@ def main() -> int:
             _dismiss(name)
             _refresh_states()               # 立刻让信封消失,不等下一个 tick(~1s)
 
-    def on_start(name: str) -> None:
-        """面板里点「启动」→「确定」后发来:拉起控制台(已运行/启动中忽略)。
-        确认已在卡片内联完成(确定/取消),这里直接走启动。
+    def on_start(name: str, session_id=None) -> None:
+        """面板里点「启动」→「确定」后发来 (name, session_id):拉起控制台。
+        session_id 为下拉选中的会话(None=新会话)。已运行/启动中忽略。
         没有「全部启动」:只能单个启动,从源头杜绝齐发挤崩 daemon 的团灭。"""
         m = by_name.get(name)
         if not m or name in launching or _live_hwnd(name) is not None:
             return
-        start_member(m)
+        start_member(m, session_id)
+
+    def _refresh_sessions(name: str) -> None:
+        """重新扫该成员 cwd 的历史会话,灌进它的下拉。"""
+        m = by_name.get(name)
+        if m is None:
+            return
+        try:
+            sess = sessions.list_sessions(m.cwd)
+        except Exception:
+            sess = []
+        panel.set_sessions(name, sess)
+
+    def on_delete_session(name: str, sid: str) -> None:
+        """下拉里删某条会话记录(.jsonl)→ 删完立刻刷新该成员下拉。"""
+        m = by_name.get(name)
+        if m is None:
+            return
+        sessions.delete_session(m.cwd, sid)
+        _refresh_sessions(name)
 
     panel.member_clicked.connect(on_row_click)
     panel.start_requested.connect(on_start)
@@ -190,6 +215,7 @@ def main() -> int:
             QMessageBox.warning(panel, "写回 agents.yaml 失败", str(e))
         panel.rebuild(members)
         last_order = []                     # 强制重排(卡片已重建)
+        member_states.clear()               # 成员增删改后旧状态作废,让下拉重新刷
         _refresh_states()
 
     def on_add() -> None:
@@ -262,6 +288,7 @@ def main() -> int:
     panel.edit_requested.connect(on_edit)
     panel.delete_requested.connect(on_delete)
     panel.open_dir_requested.connect(on_open_dir)
+    panel.delete_session_requested.connect(on_delete_session)
 
     def tick() -> None:
         # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄

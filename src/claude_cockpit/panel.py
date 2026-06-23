@@ -4,9 +4,11 @@
 运行中的成员排在最前、整卡点亮;未运行的置灰排后。
 
 对外接口(main 依赖):
-  Panel(members) / set_run_state(name,state) / set_order(names) / rebuild(members)
-  信号:member_clicked(str)、start_requested(str)、add_requested()、
-        edit_requested(str)、delete_requested(str)、open_dir_requested(str)
+  Panel(members) / set_run_state(name,state) / set_sessions(name,sessions) /
+  set_order(names) / rebuild(members)
+  信号:member_clicked(str)、start_requested(str, object)、add_requested()、
+        edit_requested(str)、delete_requested(str)、open_dir_requested(str)、
+        delete_session_requested(str, str)
 """
 from __future__ import annotations
 
@@ -53,12 +55,31 @@ QPushButton#no {
     font-size:11px; font-weight:600;
 }
 QPushButton#no:hover { background:#4a505e; color:#ffffff; }
+QPushButton#picker {
+    color:#8a93a0; background:transparent; border:none; text-align:left;
+    font-size:10px; padding:0;
+}
+QPushButton#picker:hover { color:#c7ccd6; }
+QFrame#popup { background:#2b2f3a; border:1px solid #3a3f4b; border-radius:8px; }
+QPushButton#popitem {
+    color:#c7ccd6; background:transparent; border:none; text-align:left;
+    font-size:11px; padding:4px 6px; border-radius:5px;
+}
+QPushButton#popitem:hover { background:#363b47; color:#ffffff; }
+QPushButton#popdel {
+    color:#7b828d; background:transparent; border:none;
+    font-size:13px; font-weight:700; border-radius:5px;
+}
+QPushButton#popdel:hover { color:#ff6b6b; background:#3a2a2a; }
 """
 
 # 运行键统一尺寸:三种状态同宽,右侧排成一条干净的竖列(不再忽大忽小)
 _GO_W, _GO_H = 56, 22
 # 名字下方会话标题的最大显示宽度(px),超出用省略号截断(面板固定宽 310)
 _CTITLE_W = 185
+# 会话下拉(未运行成员名字下方):按钮文字省略宽度、弹层宽度
+_PICKER_W = 170
+_POPUP_W = 250
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
@@ -119,13 +140,138 @@ class _AddCard(QFrame):
         super().mousePressEvent(e)
 
 
+class _SessionPopup(QFrame):
+    """会话下拉的浮层(Qt.Popup:点外部自动关闭)。第一行「＋ 新会话」,
+    其下每行 [标题·日期 | 删除×];删除是二次点确认(再点同一个×才真删)。"""
+    picked = Signal(str)            # "" = 新会话;否则 session_id
+    delete_requested = Signal(str)  # session_id
+
+    def __init__(self, sessions, parent=None):
+        super().__init__(parent, Qt.WindowType.Popup)
+        self.setObjectName("popup")
+        self.setFixedWidth(_POPUP_W)
+        self._confirm_id: str | None = None
+        self._dels: dict[str, QPushButton] = {}
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(2)
+
+        new = QPushButton("＋  新会话")
+        new.setObjectName("popitem")
+        new.setCursor(Qt.CursorShape.PointingHandCursor)
+        new.clicked.connect(lambda: self._pick(""))
+        lay.addWidget(new)
+
+        from . import sessions as _sess
+        for s in sessions:
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(2)
+            label = s.title if s.title else "(无标题)"
+            pick = QPushButton(f"{label} · {_sess.fmt_mtime(s.mtime)}")
+            pick.setObjectName("popitem")
+            pick.setCursor(Qt.CursorShape.PointingHandCursor)
+            pick.setToolTip(s.title or s.id)
+            pick.clicked.connect(lambda _=False, sid=s.id: self._pick(sid))
+            rl.addWidget(pick, 1)
+            dele = QPushButton("×")
+            dele.setObjectName("popdel")
+            dele.setFixedWidth(28)
+            dele.setCursor(Qt.CursorShape.PointingHandCursor)
+            dele.setToolTip("删除这条会话记录(再点一次确认)")
+            dele.clicked.connect(lambda _=False, sid=s.id: self._on_del(sid))
+            rl.addWidget(dele, 0)
+            self._dels[s.id] = dele
+            lay.addWidget(row)
+
+    def _pick(self, sid: str) -> None:
+        self.picked.emit(sid)
+        self.close()
+
+    def _on_del(self, sid: str) -> None:
+        if self._confirm_id == sid:         # 第二次点同一个 × → 真删
+            self.delete_requested.emit(sid)
+            self.close()
+            return
+        self._reset_confirm()               # 先复原别的「确认?」
+        self._confirm_id = sid
+        b = self._dels[sid]
+        b.setText("确认?")
+        b.setFixedWidth(44)
+        b.setStyleSheet("color:#fff; background:#a33; border-radius:5px;"
+                        " font-size:10px; font-weight:600;")
+
+    def _reset_confirm(self) -> None:
+        if self._confirm_id and self._confirm_id in self._dels:
+            b = self._dels[self._confirm_id]
+            b.setText("×")
+            b.setFixedWidth(28)
+            b.setStyleSheet("")
+        self._confirm_id = None
+
+
+class _SessionPicker(QWidget):
+    """未运行成员名字下方的会话下拉:平时显示当前选中(「续:<标题>」或「＋ 新会话」),
+    点开弹 _SessionPopup 选择/删除。删除经 delete_requested 上抛给卡片。"""
+    delete_requested = Signal(str)  # session_id
+
+    def __init__(self):
+        super().__init__()
+        self._sessions: list = []
+        self._sel_id: str | None = None     # None = 新会话
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._btn = QPushButton("＋ 新会话")
+        self._btn.setObjectName("picker")
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.clicked.connect(self._open)
+        lay.addWidget(self._btn)
+
+    def set_sessions(self, sessions) -> None:
+        self._sessions = list(sessions)
+        # 默认选中最近一条;没有历史 → 新会话
+        self._sel_id = self._sessions[0].id if self._sessions else None
+        self._update_btn()
+
+    def selected_id(self) -> str | None:
+        return self._sel_id
+
+    def _update_btn(self) -> None:
+        if self._sel_id is None:
+            self._btn.setText("＋ 新会话")
+            self._btn.setToolTip("启动后开一个全新会话")
+            return
+        s = next((x for x in self._sessions if x.id == self._sel_id), None)
+        label = (s.title if (s and s.title) else "(无标题)")
+        text = QFontMetrics(self._btn.font()).elidedText(
+            f"续:{label}", Qt.TextElideMode.ElideRight, _PICKER_W)
+        self._btn.setText(text)
+        self._btn.setToolTip(f"启动后续接:{label}(点开可换/新建/删除)")
+
+    def _open(self) -> None:
+        pop = _SessionPopup(self._sessions, self)
+        pop.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # 关一个销毁一个,别堆积
+        pop.picked.connect(self._on_picked)
+        pop.delete_requested.connect(self.delete_requested.emit)
+        pop.move(self._btn.mapToGlobal(self._btn.rect().bottomLeft()))
+        pop.show()
+
+    def _on_picked(self, sid: str) -> None:
+        self._sel_id = sid or None
+        self._update_btn()
+
+
 class Panel(QWidget):
     member_clicked = Signal(str)    # 点整条横条:仅运行后置前
-    start_requested = Signal(str)   # 点「启动」键:拉起控制台
+    start_requested = Signal(str, object)   # (name, session_id|None):点「确定」后拉起
     add_requested = Signal()
     edit_requested = Signal(str)
     delete_requested = Signal(str)
     open_dir_requested = Signal(str)    # 右键「打开目录」:用资源管理器开成员 cwd
+    delete_session_requested = Signal(str, str)  # (name, session_id):删该成员某会话记录
 
     def __init__(self, members):
         super().__init__()
@@ -142,6 +288,7 @@ class Panel(QWidget):
         self._envs: dict[str, QLabel] = {}     # 每行的「有新消息」小信封
         self._ctitles: dict[str, QLabel] = {}  # 名字下面那行:成员会话的实时窗口标题
         self._ctitle_raw: dict[str, str] = {}  # 标题原文(用于宽度变化时重新省略)
+        self._pickers: dict[str, "_SessionPicker"] = {}  # 未运行成员的会话下拉
         self._effects: dict[str, QGraphicsOpacityEffect] = {}
         self._cards: dict[str, _Card] = {}
         self._confirm_boxes: dict[str, QWidget] = {}   # 内联「确定/取消」条
@@ -191,7 +338,7 @@ class Panel(QWidget):
 
         accent = QFrame()
         accent.setFixedWidth(4)
-        accent.setMinimumHeight(40)
+        accent.setMinimumHeight(46)
         accent.setStyleSheet(f"background:{m.color}; border-radius:2px;")
         lay.addWidget(accent)
 
@@ -225,6 +372,13 @@ class Panel(QWidget):
         ctitle.setVisible(False)
         col.addWidget(ctitle)
         self._ctitles[m.name] = ctitle
+
+        # 同一行位:未运行显示会话下拉(选要续的会话),运行中让位给上面的实时标题
+        picker = _SessionPicker()
+        picker.delete_requested.connect(
+            lambda sid, n=m.name: self.delete_session_requested.emit(n, sid))
+        col.addWidget(picker)
+        self._pickers[m.name] = picker
 
         lay.addLayout(col, 1)                   # 这一列吃掉中间空间,把运行键顶到最右
 
@@ -279,6 +433,7 @@ class Panel(QWidget):
         self._envs.clear()
         self._ctitles.clear()
         self._ctitle_raw.clear()
+        self._pickers.clear()
         self._effects.clear()
         self._cards.clear()
         self._confirm_boxes.clear()
@@ -318,7 +473,7 @@ class Panel(QWidget):
         self.set_run_state(name, "down")
 
     def _confirm_yes(self, name: str) -> None:
-        """确定 → 收起确认条,走启动流程。"""
+        """确定 → 收起确认条,按下拉选中的会话走启动流程。"""
         self._confirming.discard(name)
         box = self._confirm_boxes.get(name)
         if box is not None:
@@ -326,7 +481,9 @@ class Panel(QWidget):
         go = self._gos.get(name)
         if go is not None:
             go.setVisible(True)
-        self.start_requested.emit(name)
+        picker = self._pickers.get(name)
+        sid = picker.selected_id() if picker is not None else None
+        self.start_requested.emit(name, sid)
 
     def _apply_dot(self, name: str) -> None:
         env = self._envs.get(name)
@@ -371,6 +528,12 @@ class Panel(QWidget):
         lbl.setToolTip(text)
         lbl.setVisible(True)
 
+    def set_sessions(self, name: str, sessions) -> None:
+        """给某成员的会话下拉灌数据(列表已按最近活跃倒序);默认选最近一条/无则新会话。"""
+        p = self._pickers.get(name)
+        if p is not None:
+            p.set_sessions(sessions)
+
     def set_run_state(self, name: str, state: str) -> None:
         """state ∈ {down(未运行), launching(启动中), running(运行中)}。
         控制整卡明暗 + 右侧运行键的文字/样式;确认态优先(显示确定/取消)。"""
@@ -388,6 +551,14 @@ class Panel(QWidget):
         eff = self._effects.get(name)
         if eff is not None:                     # 确认中也点亮;纯未运行才置灰
             eff.setOpacity(_DIM if (state == "down" and not confirming) else 1.0)
+
+        picker = self._pickers.get(name)
+        if picker is not None:
+            picker.setVisible(state == "down")
+        if state == "down":
+            ctitle = self._ctitles.get(name)
+            if ctitle is not None:
+                ctitle.setVisible(False)
 
         go = self._gos.get(name)
         if go is None:
