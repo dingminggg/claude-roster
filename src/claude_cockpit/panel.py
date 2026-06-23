@@ -251,6 +251,7 @@ class _SessionPicker(QWidget):
 
     def _open(self) -> None:
         pop = _SessionPopup(self._sessions, self)
+        pop.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # 关一个销毁一个,别堆积
         pop.picked.connect(self._on_picked)
         pop.delete_requested.connect(self.delete_requested.emit)
         pop.move(self._btn.mapToGlobal(self._btn.rect().bottomLeft()))
