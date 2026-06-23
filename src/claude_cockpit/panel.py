@@ -53,12 +53,31 @@ QPushButton#no {
     font-size:11px; font-weight:600;
 }
 QPushButton#no:hover { background:#4a505e; color:#ffffff; }
+QPushButton#picker {
+    color:#8a93a0; background:transparent; border:none; text-align:left;
+    font-size:10px; padding:0;
+}
+QPushButton#picker:hover { color:#c7ccd6; }
+QFrame#popup { background:#2b2f3a; border:1px solid #3a3f4b; border-radius:8px; }
+QPushButton#popitem {
+    color:#c7ccd6; background:transparent; border:none; text-align:left;
+    font-size:11px; padding:4px 6px; border-radius:5px;
+}
+QPushButton#popitem:hover { background:#363b47; color:#ffffff; }
+QPushButton#popdel {
+    color:#7b828d; background:transparent; border:none;
+    font-size:13px; font-weight:700; border-radius:5px;
+}
+QPushButton#popdel:hover { color:#ff6b6b; background:#3a2a2a; }
 """
 
 # 运行键统一尺寸:三种状态同宽,右侧排成一条干净的竖列(不再忽大忽小)
 _GO_W, _GO_H = 56, 22
 # 名字下方会话标题的最大显示宽度(px),超出用省略号截断(面板固定宽 310)
 _CTITLE_W = 185
+# 会话下拉(未运行成员名字下方):按钮文字省略宽度、弹层宽度
+_PICKER_W = 170
+_POPUP_W = 250
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
@@ -117,6 +136,129 @@ class _AddCard(QFrame):
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(e)
+
+
+class _SessionPopup(QFrame):
+    """会话下拉的浮层(Qt.Popup:点外部自动关闭)。第一行「＋ 新会话」,
+    其下每行 [标题·日期 | 删除×];删除是二次点确认(再点同一个×才真删)。"""
+    picked = Signal(str)            # "" = 新会话;否则 session_id
+    delete_requested = Signal(str)  # session_id
+
+    def __init__(self, sessions, parent=None):
+        super().__init__(parent, Qt.WindowType.Popup)
+        self.setObjectName("popup")
+        self.setFixedWidth(_POPUP_W)
+        self._confirm_id: str | None = None
+        self._dels: dict[str, QPushButton] = {}
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(2)
+
+        new = QPushButton("＋  新会话")
+        new.setObjectName("popitem")
+        new.setCursor(Qt.CursorShape.PointingHandCursor)
+        new.clicked.connect(lambda: self._pick(""))
+        lay.addWidget(new)
+
+        from . import sessions as _sess
+        for s in sessions:
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(2)
+            label = s.title if s.title else "(无标题)"
+            pick = QPushButton(f"{label} · {_sess.fmt_mtime(s.mtime)}")
+            pick.setObjectName("popitem")
+            pick.setCursor(Qt.CursorShape.PointingHandCursor)
+            pick.setToolTip(s.title or s.id)
+            pick.clicked.connect(lambda _=False, sid=s.id: self._pick(sid))
+            rl.addWidget(pick, 1)
+            dele = QPushButton("×")
+            dele.setObjectName("popdel")
+            dele.setFixedWidth(28)
+            dele.setCursor(Qt.CursorShape.PointingHandCursor)
+            dele.setToolTip("删除这条会话记录(再点一次确认)")
+            dele.clicked.connect(lambda _=False, sid=s.id: self._on_del(sid))
+            rl.addWidget(dele, 0)
+            self._dels[s.id] = dele
+            lay.addWidget(row)
+
+    def _pick(self, sid: str) -> None:
+        self.picked.emit(sid)
+        self.close()
+
+    def _on_del(self, sid: str) -> None:
+        if self._confirm_id == sid:         # 第二次点同一个 × → 真删
+            self.delete_requested.emit(sid)
+            self.close()
+            return
+        self._reset_confirm()               # 先复原别的「确认?」
+        self._confirm_id = sid
+        b = self._dels[sid]
+        b.setText("确认?")
+        b.setFixedWidth(44)
+        b.setStyleSheet("color:#fff; background:#a33; border-radius:5px;"
+                        " font-size:10px; font-weight:600;")
+
+    def _reset_confirm(self) -> None:
+        if self._confirm_id and self._confirm_id in self._dels:
+            b = self._dels[self._confirm_id]
+            b.setText("×")
+            b.setFixedWidth(28)
+            b.setStyleSheet("")
+        self._confirm_id = None
+
+
+class _SessionPicker(QWidget):
+    """未运行成员名字下方的会话下拉:平时显示当前选中(「续:<标题>」或「＋ 新会话」),
+    点开弹 _SessionPopup 选择/删除。删除经 delete_requested 上抛给卡片。"""
+    delete_requested = Signal(str)  # session_id
+
+    def __init__(self):
+        super().__init__()
+        self._sessions: list = []
+        self._sel_id: str | None = None     # None = 新会话
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._btn = QPushButton("＋ 新会话")
+        self._btn.setObjectName("picker")
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.clicked.connect(self._open)
+        lay.addWidget(self._btn)
+
+    def set_sessions(self, sessions) -> None:
+        self._sessions = list(sessions)
+        # 默认选中最近一条;没有历史 → 新会话
+        self._sel_id = self._sessions[0].id if self._sessions else None
+        self._update_btn()
+
+    def selected_id(self) -> str | None:
+        return self._sel_id
+
+    def _update_btn(self) -> None:
+        if self._sel_id is None:
+            self._btn.setText("＋ 新会话")
+            self._btn.setToolTip("启动后开一个全新会话")
+            return
+        s = next((x for x in self._sessions if x.id == self._sel_id), None)
+        label = (s.title if (s and s.title) else "(无标题)")
+        text = QFontMetrics(self._btn.font()).elidedText(
+            f"续:{label}", Qt.TextElideMode.ElideRight, _PICKER_W)
+        self._btn.setText(text)
+        self._btn.setToolTip(f"启动后续接:{label}(点开可换/新建/删除)")
+
+    def _open(self) -> None:
+        pop = _SessionPopup(self._sessions, self)
+        pop.picked.connect(self._on_picked)
+        pop.delete_requested.connect(self.delete_requested.emit)
+        pop.move(self._btn.mapToGlobal(self._btn.rect().bottomLeft()))
+        pop.show()
+
+    def _on_picked(self, sid: str) -> None:
+        self._sel_id = sid or None
+        self._update_btn()
 
 
 class Panel(QWidget):
