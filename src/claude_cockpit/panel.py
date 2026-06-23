@@ -79,6 +79,8 @@ _GO_W, _GO_H = 56, 22
 _CTITLE_W = 185
 # 会话下拉(未运行成员名字下方):按钮文字省略宽度、弹层宽度
 _PICKER_W = 170
+# 下拉按钮末尾的展开箭头(提示这行可点开),始终可见
+_PICKER_ARROW = "  ▾"
 _POPUP_W = 250
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
@@ -224,7 +226,7 @@ class _SessionPicker(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        self._btn = QPushButton("＋ 新会话")
+        self._btn = QPushButton(f"＋ 新会话{_PICKER_ARROW}")
         self._btn.setObjectName("picker")
         self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn.clicked.connect(self._open)
@@ -241,14 +243,16 @@ class _SessionPicker(QWidget):
 
     def _update_btn(self) -> None:
         if self._sel_id is None:
-            self._btn.setText("＋ 新会话")
-            self._btn.setToolTip("启动后开一个全新会话")
+            self._btn.setText(f"＋ 新会话{_PICKER_ARROW}")
+            self._btn.setToolTip("启动后开一个全新会话(点开可选历史会话)")
             return
         s = next((x for x in self._sessions if x.id == self._sel_id), None)
         label = (s.title if (s and s.title) else "(无标题)")
-        text = QFontMetrics(self._btn.font()).elidedText(
-            f"续:{label}", Qt.TextElideMode.ElideRight, _PICKER_W)
-        self._btn.setText(text)
+        # 标题先按「留出箭头宽度」省略,再拼上箭头,使 ▾ 始终可见、提示可展开
+        fm = QFontMetrics(self._btn.font())
+        avail = _PICKER_W - fm.horizontalAdvance(_PICKER_ARROW)
+        text = fm.elidedText(f"续:{label}", Qt.TextElideMode.ElideRight, max(0, avail))
+        self._btn.setText(f"{text}{_PICKER_ARROW}")
         self._btn.setToolTip(f"启动后续接:{label}(点开可换/新建/删除)")
 
     def _open(self) -> None:
