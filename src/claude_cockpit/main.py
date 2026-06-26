@@ -93,9 +93,9 @@ def main() -> int:
     last_order: list[str] = []
     blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
     cur_pending: set[str] = set()       # 当前「该你看了」的成员(tick 刷新)
-    acked: set[str] = set()             # 已确认过闪烁的成员:列表仍标待处理,只是不再闪
-    # 信封「逐个点掉」:点过某张卡 → 它的 ✉ 停闪(本地标记,不删信号文件,
-    # 故权限 pending 仍留给小青蛙/真去答时清)。成员离开 pending 后自动复位 → 再来重新闪。
+    # 「逐个点掉」:点过某张卡 / 在悬停浮层里点过某成员 → 它的 ✉ 停闪,且不再计入托盘闪烁
+    # (本地标记,不删信号文件,故权限 pending 仍留到真去答时清)。成员离开 pending 后自动复位。
+    # 统一口径:托盘闪烁、卡片信封、悬停浮层都看 cur_pending - card_read,逐个点掉、全点完才停。
     card_read: set[str] = set()
 
     # 悬停浮层:tray_popup 为当前显示的实例(None=没显示);hover_misses 累计「光标
@@ -108,11 +108,6 @@ def main() -> int:
     # None 表示首个 tick → 只播种不响(避免开机时对遗留 pending 一通叫)。
     sound_enabled = settings.load().get("sound_enabled", True)
     prev_pending: set[str] | None = None
-
-    def _ack_blink() -> None:
-        """你已经在看了(点了托盘图标 / 点了某张卡)→ 当前 pending 全部标为已确认,
-        托盘停闪;但列表里仍保留「待处理」高亮,直到逐个点掉。新 pending 会重新闪。"""
-        acked.update(cur_pending)
 
     def _live_hwnd(name: str) -> int | None:
         h = hwnds.get(name)
@@ -194,12 +189,12 @@ def main() -> int:
 
     def on_row_click(name: str) -> None:
         """点成员横条:已运行 → 先把其它还活着的控制台最小化(多屏下都最大化时
-        没法一眼区分),再把它的控制台最大化弹到眼前 + 标记已读(清 turn-ended)
-        + 确认闪烁(托盘停闪)。未运行/启动中无反应。"""
+        没法一眼区分),再把它的控制台最大化弹到眼前 + 标记已读(清 turn-ended)。
+        标记已读会把这成员从托盘闪烁里摘掉;多个待处理时逐个点掉、全点完才停闪。
+        未运行/启动中无反应。"""
         h = _live_hwnd(name)
         if h is not None:
-            _ack_blink()                    # 点了列表 → 托盘停闪
-            card_read.add(name)             # 这张卡的 ✉ 也停闪(权限 pending 不删文件,仅本地已读)
+            card_read.add(name)             # 标记已读:✉ 停闪 + 不再计入托盘闪烁(权限 pending 不删文件)
             for other in members:           # 只碰缓存里且还活着的句柄,绝不 launch
                 if other.name == name:
                     continue
@@ -345,8 +340,7 @@ def main() -> int:
         prev_pending = set(pending)
         cur_pending.clear()
         cur_pending.update(pending)
-        acked.intersection_update(pending)  # 不再 pending 的从已确认里移除 → 再来会重新闪
-        card_read.intersection_update(pending)  # 同理:答完/清掉后复位,新一轮 pending 重新闪
+        card_read.intersection_update(pending)  # 不再 pending 的复位 → 新一轮 pending 重新闪/亮
         # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
         _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
         # 名字下面那行:用缓存的活句柄直接读控制台标题(claude 起来后会改成它的状态)
@@ -393,23 +387,22 @@ def main() -> int:
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)
     tray.setToolTip("Claude 驾驶舱")
-    # 左键/双击托盘图标 → 还原面板 + 停闪(你已经在看了;待处理高亮仍留在列表)
+    # 左键/双击托盘图标 → 还原面板(顺手关掉悬停浮层)。不停闪:闪烁只由「逐个点掉成员」清。
     def _on_tray_activated(r) -> None:
         if r in (QSystemTrayIcon.ActivationReason.Trigger,
                  QSystemTrayIcon.ActivationReason.DoubleClick):
-            _ack_blink()
             _hide_tray_popup()
             _restore_panel()
 
     tray.activated.connect(_on_tray_activated)
     tray.show()
 
-    # 闪烁:有「该你看了」且尚未确认(未点托盘/未点卡)→ 托盘图标在 图标/空 间交替。
-    # 点了托盘或某张卡 → 确认停闪(列表仍标待处理);处理掉或新成员答完会再变。
+    # 闪烁:有「该你看了」且还没逐个点掉(cur_pending - card_read 非空)→ 托盘图标在 图标/空 间交替。
+    # 点掉某成员(点卡 / 悬停浮层里点)→ 它从闪烁集合摘除;全部点完才停闪。悬停、点托盘都不停闪。
     _empty_icon = QIcon()
 
     def _blink_tick() -> None:
-        if not (cur_pending - acked):       # 没有「未确认的待处理」→ 复位
+        if not (cur_pending - card_read):   # 没有「未点掉的待处理」→ 复位
             if blink_state["on"]:
                 blink_state["on"] = False
             tray.setIcon(icon)
@@ -440,7 +433,9 @@ def main() -> int:
 
     def _show_tray_popup() -> None:
         nonlocal tray_popup
-        rows = [(m.name, m.emoji, m.color) for m in members if m.name in cur_pending]
+        # 只列「还没点掉」的待处理成员(与托盘闪烁/卡片信封同一口径)
+        rows = [(m.name, m.emoji, m.color)
+                for m in members if m.name in cur_pending and m.name not in card_read]
         if not rows:
             return
         _hide_tray_popup()              # 防御:先清掉可能残留的旧实例
@@ -451,7 +446,7 @@ def main() -> int:
         if r.isNull() or r.isEmpty():   # 几何失准(溢出区等)→ 不弹,避免错位到屏角
             pop.deleteLater()
             return
-        x = r.right() - pop.width()     # 右边缘对齐图标
+        x = r.center().x() - pop.width() // 2   # 水平居中对齐图标(不右对齐)
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         g = screen.availableGeometry() if screen is not None else None
         above_y = r.top() - pop.height() - 6
@@ -466,7 +461,7 @@ def main() -> int:
         pop.move(x, y)
         pop.show()
         tray_popup = pop
-        _ack_blink()                    # 你已经在看了 → 托盘停闪
+        # 悬停弹出不停闪:闪烁只在「逐个点掉成员」时清(见 _blink_tick 用 card_read)
 
     def _hover_tick() -> None:
         pos = QCursor.pos()
@@ -482,7 +477,8 @@ def main() -> int:
             hover_misses["n"] += 1
         else:
             hover_misses["n"] = 0
-        action = tray_popup_decision(bool(cur_pending), over_icon, over_popup,
+        # has_pending 用「还没点掉」的口径:全点掉后悬停不再弹空浮层
+        action = tray_popup_decision(bool(cur_pending - card_read), over_icon, over_popup,
                                      visible, hover_misses["n"], _HOVER_MISS_LIMIT)
         if action == "show":
             _show_tray_popup()

@@ -290,7 +290,7 @@ class TrayPopup(QFrame):
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(2)
         for name, emoji, color in rows:
-            b = QPushButton(f"{emoji} @{name}  ✉")
+            b = QPushButton(f"{emoji} @{name}")
             b.setObjectName("popitem")
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setStyleSheet(f"color:{color};")  # 名字用成员配色,和卡片一致
