@@ -413,7 +413,8 @@ def main() -> int:
             return
         blink_state["on"] = not blink_state["on"]
         tray.setIcon(_empty_icon if blink_state["on"] else icon)
-        tray.setToolTip("有成员答完/等你 · 点我打开")
+        # 闪烁时清掉系统托盘原生 tooltip:悬停就只显示我们的成员浮层,不再蹦出旧提示文字
+        tray.setToolTip("")
 
     blink_timer = QTimer()
     blink_timer.timeout.connect(_blink_tick)
