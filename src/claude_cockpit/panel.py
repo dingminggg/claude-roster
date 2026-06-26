@@ -82,6 +82,9 @@ _PICKER_W = 190
 # 下拉按钮末尾的展开箭头(提示这行可点开),始终可见
 _PICKER_ARROW = "  ▾"
 _POPUP_W = 256
+# 托盘悬停浮层:比会话下拉窄一半,成员名短;过长省略,左右留点空隙
+_TRAY_POPUP_W = 132
+_TRAY_POPUP_MARGIN = 8          # 浮层内左右边距
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
@@ -284,16 +287,21 @@ class TrayPopup(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # 不偷当前前台焦点
         self.setObjectName("popup")
         self.setStyleSheet(_QSS)                # 顶层窗口自带样式,不靠 Panel 级联
-        self.setFixedWidth(_POPUP_W)
+        self.setFixedWidth(_TRAY_POPUP_W)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setContentsMargins(_TRAY_POPUP_MARGIN, 4, _TRAY_POPUP_MARGIN, 4)
         lay.setSpacing(2)
+        # 文字可用宽 = 浮层宽 - 左右内边距 - popitem 自身左右 padding(QSS 里 8px*2)
+        avail = _TRAY_POPUP_W - _TRAY_POPUP_MARGIN * 2 - 16
+        fm = QFontMetrics(self.font())
         for name, emoji, color in rows:
-            b = QPushButton(f"{emoji} @{name}")
+            full = f"{emoji} @{name}"
+            b = QPushButton(fm.elidedText(full, Qt.TextElideMode.ElideRight, avail))
             b.setObjectName("popitem")
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setStyleSheet(f"color:{color};")  # 名字用成员配色,和卡片一致
+            b.setToolTip(full)                  # 截断了也能悬停看全名
             b.clicked.connect(lambda _=False, n=name: self.picked.emit(n))
             lay.addWidget(b)
 
