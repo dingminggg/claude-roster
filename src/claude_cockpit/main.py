@@ -398,6 +398,7 @@ def main() -> int:
         if r in (QSystemTrayIcon.ActivationReason.Trigger,
                  QSystemTrayIcon.ActivationReason.DoubleClick):
             _ack_blink()
+            _hide_tray_popup()
             _restore_panel()
 
     tray.activated.connect(_on_tray_activated)
@@ -447,12 +448,16 @@ def main() -> int:
         pop.picked.connect(_on_popup_pick)
         pop.adjustSize()
         r = tray.geometry()
-        # 贴托盘图标正上方、右边缘对齐(任务栏在底部)
-        x = r.right() - pop.width()
-        y = r.top() - pop.height() - 6
+        x = r.right() - pop.width()     # 右边缘对齐图标
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-        if screen is not None:          # 夹紧进所在屏幕可见区,别出屏
-            g = screen.availableGeometry()
+        g = screen.availableGeometry() if screen is not None else None
+        above_y = r.top() - pop.height() - 6
+        # 默认贴图标正上方;若上方放不下(任务栏在顶/图标贴屏顶)→ 落到图标下方
+        if g is not None and above_y < g.top():
+            y = r.bottom() + 6
+        else:
+            y = above_y
+        if g is not None:               # 夹紧进所在屏幕可见区,别出屏
             x = max(g.left(), min(x, g.right() - pop.width()))
             y = max(g.top(), min(y, g.bottom() - pop.height()))
         pop.move(x, y)
