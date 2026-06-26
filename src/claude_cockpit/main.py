@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QCursor, QGuiApplication, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QMenu, QMessageBox, QSystemTrayIcon,
@@ -16,7 +16,7 @@ from . import cc_signals, dialogs, sessions, settings, sound, store, winman
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
 from .matching import match_pending, norm_path
-from .panel import ICON_PATH, Panel
+from .panel import ICON_PATH, Panel, TrayPopup
 
 
 def newly_pending(prev: set[str], cur: set[str]) -> set[str]:
@@ -97,6 +97,12 @@ def main() -> int:
     # 信封「逐个点掉」:点过某张卡 → 它的 ✉ 停闪(本地标记,不删信号文件,
     # 故权限 pending 仍留给小青蛙/真去答时清)。成员离开 pending 后自动复位 → 再来重新闪。
     card_read: set[str] = set()
+
+    # 悬停浮层:tray_popup 为当前显示的实例(None=没显示);hover_misses 累计「光标
+    # 离开图标和浮层」的连续拍数,达到 _HOVER_MISS_LIMIT 才隐藏(给图标↔浮层缝隙宽限)。
+    tray_popup: TrayPopup | None = None
+    hover_misses = {"n": 0}
+    _HOVER_MISS_LIMIT = 2
 
     # 提示音:有新成员进入 pending 就响一声。prev_pending 记上一轮 pending,
     # None 表示首个 tick → 只播种不响(避免开机时对遗留 pending 一通叫)。
@@ -415,6 +421,69 @@ def main() -> int:
     blink_timer = QTimer()
     blink_timer.timeout.connect(_blink_tick)
     blink_timer.start(550)
+
+    # 托盘悬停浮层:有消息时把光标移到托盘图标上方 → 弹出「谁有消息」可点列表,
+    # 点一行 = 等价点成员卡(on_row_click:最大化该控制台/其余最小化/标记已读)。
+    # QSystemTrayIcon 无原生 hover 事件,只能 150ms 轮询光标对 tray.geometry()。
+    def _hide_tray_popup() -> None:
+        nonlocal tray_popup
+        if tray_popup is not None:
+            tray_popup.close()
+            tray_popup.deleteLater()
+            tray_popup = None
+        hover_misses["n"] = 0
+
+    def _on_popup_pick(name: str) -> None:
+        _hide_tray_popup()
+        on_row_click(name)              # 复用:死窗口时它本就安全 no-op
+
+    def _show_tray_popup() -> None:
+        nonlocal tray_popup
+        rows = [(m.name, m.emoji, m.color) for m in members if m.name in cur_pending]
+        if not rows:
+            return
+        _hide_tray_popup()              # 防御:先清掉可能残留的旧实例
+        pop = TrayPopup(rows)
+        pop.picked.connect(_on_popup_pick)
+        pop.adjustSize()
+        r = tray.geometry()
+        # 贴托盘图标正上方、右边缘对齐(任务栏在底部)
+        x = r.right() - pop.width()
+        y = r.top() - pop.height() - 6
+        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if screen is not None:          # 夹紧进所在屏幕可见区,别出屏
+            g = screen.availableGeometry()
+            x = max(g.left(), min(x, g.right() - pop.width()))
+            y = max(g.top(), min(y, g.bottom() - pop.height()))
+        pop.move(x, y)
+        pop.show()
+        tray_popup = pop
+        _ack_blink()                    # 你已经在看了 → 托盘停闪
+
+    def _hover_tick() -> None:
+        pos = QCursor.pos()
+        r = tray.geometry()
+        geo_ok = not (r.isNull() or r.isEmpty())   # 折叠进「隐藏图标」溢出区时几何失准
+        over_icon = geo_ok and r.contains(pos)
+        visible = tray_popup is not None and tray_popup.isVisible()
+        over_popup = False
+        if visible:
+            pg = tray_popup.geometry().adjusted(-8, -8, 8, 8)   # 外扩容差,跨缝隙不丢
+            over_popup = pg.contains(pos)
+        if visible and not over_icon and not over_popup:
+            hover_misses["n"] += 1
+        else:
+            hover_misses["n"] = 0
+        action = tray_popup_decision(bool(cur_pending), over_icon, over_popup,
+                                     visible, hover_misses["n"], _HOVER_MISS_LIMIT)
+        if action == "show":
+            _show_tray_popup()
+        elif action == "hide":
+            _hide_tray_popup()
+
+    hover_timer = QTimer()
+    hover_timer.timeout.connect(_hover_tick)
+    hover_timer.start(150)
 
     # 单实例服务端:后续实例连进来 → 把本面板弹到前台
     def _raise_panel() -> None:
