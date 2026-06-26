@@ -327,6 +327,9 @@ def main() -> int:
                 hwnds.pop(n, None)
             store.save(hwnds)
         cc_signals.prune_turn_ended()       # 清掉没触发 clear 的陈旧「该你看了」
+        # 同样清陈旧 pending:会话在权限确认中被关掉时 Stop/UserPromptSubmit 不会触发清除,
+        # 孤儿 pending 文件会永远留着、每次重启都假装「有消息」。按时效裁掉(同 turn-ended 30min)。
+        cc_signals.prune_stale(1800)
         # 「该你看了」= 答完一轮(turn-ended,驾驶舱专属) ∪ 等权限(与桌宠共享)
         pending = match_pending(
             cc_signals.read_turn_ended_full() + cc_signals.read_pending_full(),
