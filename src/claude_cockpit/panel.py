@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QVBoxLayout, QWidget,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 # 图标:claude-groupchat 的「多只小青蛙」图,已复制进本包 assets
@@ -30,7 +30,7 @@ QLabel#title { color:#eaecef; font-size:14px; font-weight:700; }
 QLabel#subtitle { color:#6e7682; font-size:11px; }
 QFrame#card { background:#22252d; border-radius:10px; }
 QFrame#card:hover { background:#2b2f3a; }
-QLabel#env { color:#ffffff; font-size:19px; background:transparent; }
+QLabel#env { color:#ffffff; font-size:26px; font-weight:bold; background:transparent; }
 QFrame#addcard {
     background:transparent; border:1px dashed #3a3f4b; border-radius:10px;
 }
@@ -57,13 +57,13 @@ QPushButton#no {
 QPushButton#no:hover { background:#4a505e; color:#ffffff; }
 QPushButton#picker {
     color:#8a93a0; background:transparent; border:none; text-align:left;
-    font-size:10px; padding:0;
+    font-size:12px; padding:1px 0;
 }
 QPushButton#picker:hover { color:#c7ccd6; }
 QFrame#popup { background:#2b2f3a; border:1px solid #3a3f4b; border-radius:8px; }
 QPushButton#popitem {
     color:#c7ccd6; background:transparent; border:none; text-align:left;
-    font-size:11px; padding:4px 6px; border-radius:5px;
+    font-size:13px; padding:6px 8px; border-radius:5px;
 }
 QPushButton#popitem:hover { background:#363b47; color:#ffffff; }
 QPushButton#popdel {
@@ -78,10 +78,10 @@ _GO_W, _GO_H = 56, 22
 # 名字下方会话标题的最大显示宽度(px),超出用省略号截断(面板固定宽 310)
 _CTITLE_W = 185
 # 会话下拉(未运行成员名字下方):按钮文字省略宽度、弹层宽度
-_PICKER_W = 170
+_PICKER_W = 190
 # 下拉按钮末尾的展开箭头(提示这行可点开),始终可见
 _PICKER_ARROW = "  ▾"
-_POPUP_W = 250
+_POPUP_W = 256
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
@@ -337,16 +337,19 @@ class Panel(QWidget):
         card.delete.connect(lambda n=m.name: self.delete_requested.emit(n))
         card.open_dir.connect(lambda n=m.name: self.open_dir_requested.emit(n))
         lay = QHBoxLayout(card)
-        lay.setContentsMargins(0, 0, 10, 0)
+        lay.setContentsMargins(0, 0, 10, 0)     # 卡片本身不留边,色条好撑满全高;底部空隙放进 col
         lay.setSpacing(10)
 
         accent = QFrame()
         accent.setFixedWidth(4)
-        accent.setMinimumHeight(46)
+        accent.setMinimumHeight(40)
+        # 竖向撑满整张卡片高度,让左侧色条和右侧内容上下对齐
+        accent.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         accent.setStyleSheet(f"background:{m.color}; border-radius:2px;")
         lay.addWidget(accent)
 
         # 左侧一列:第一行 名字 + 信封,第二行 该会话的实时窗口标题(小灰字)
+        # 末尾垫一个弹簧把内容顶到上方(否则 QBoxLayout 会把内容压到底部)
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(1)
@@ -354,15 +357,16 @@ class Panel(QWidget):
         row1 = QHBoxLayout()
         row1.setContentsMargins(0, 0, 0, 0)
         row1.setSpacing(6)
-        name = QLabel(f"{m.emoji}  @{m.name}")
+        name = QLabel(f"{m.emoji} @{m.name}")
         name.setObjectName("name")
         name.setStyleSheet(f"color:{m.color};")
         row1.addWidget(name, 0)
 
         # 「有新消息」小信封:紧跟名字后面,始终占位(固定宽),只切换 ✉/空,闪烁
+        # 限定行高,别让 26px 的大信封把名字这一行撑高、和下面下拉拉开太远
         env = QLabel()
         env.setObjectName("env")
-        env.setFixedWidth(26)
+        env.setFixedSize(34, 22)
         env.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row1.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
         self._envs[m.name] = env
@@ -383,6 +387,7 @@ class Panel(QWidget):
             lambda sid, n=m.name: self.delete_session_requested.emit(n, sid))
         col.addWidget(picker)
         self._pickers[m.name] = picker
+        col.addSpacing(6)       # 底部留一点空隙(放在 col 内,色条仍能撑满全高盖住它)
 
         lay.addLayout(col, 1)                   # 这一列吃掉中间空间,把运行键顶到最右
 
