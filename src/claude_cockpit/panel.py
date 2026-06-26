@@ -82,9 +82,9 @@ _PICKER_W = 190
 # 下拉按钮末尾的展开箭头(提示这行可点开),始终可见
 _PICKER_ARROW = "  ▾"
 _POPUP_W = 256
-# 托盘悬停浮层:比会话下拉窄一半,成员名短;过长省略,左右留点空隙
+# 托盘悬停浮层:比会话下拉窄一半,成员名短;过长省略,行内 padding 已给空隙
 _TRAY_POPUP_W = 132
-_TRAY_POPUP_MARGIN = 8          # 浮层内左右边距
+_TRAY_POPUP_MARGIN = 4          # 外层只留极小边,够把 hover 高亮收进圆角即可
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
@@ -285,6 +285,8 @@ class TrayPopup(QFrame):
                          | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # 不偷当前前台焦点
+        # 透明背景:让 #popup 的 border-radius 真正显出圆角(否则无边框窗的方角会盖住圆角)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setObjectName("popup")
         self.setStyleSheet(_QSS)                # 顶层窗口自带样式,不靠 Panel 级联
         self.setFixedWidth(_TRAY_POPUP_W)
