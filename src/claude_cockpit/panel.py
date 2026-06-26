@@ -268,6 +268,36 @@ class _SessionPicker(QWidget):
         self._update_btn()
 
 
+class TrayPopup(QFrame):
+    """托盘悬停时弹出的无边框小浮层:列出有消息的成员,点一行发 picked(name)。
+    显隐由 main 的悬停定时器控制——故意不用 Qt.Popup(那种一移开鼠标就当点了外面
+    自动关,与悬停模型冲突);用 Tool + 不抢焦点窗口,我们自己控显隐。
+    生命周期由调用方掌管:用完须 close() + deleteLater() 释放(它不是 Qt.Popup,不会自动销毁)。"""
+    picked = Signal(str)
+
+    def __init__(self, rows, parent=None):
+        # rows: list[(name, emoji, color)]
+        super().__init__(parent,
+                         Qt.WindowType.Tool
+                         | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # 不偷当前前台焦点
+        self.setObjectName("popup")
+        self.setStyleSheet(_QSS)                # 顶层窗口自带样式,不靠 Panel 级联
+        self.setFixedWidth(_POPUP_W)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(2)
+        for name, emoji, color in rows:
+            b = QPushButton(f"{emoji} @{name}  ✉")
+            b.setObjectName("popitem")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(f"color:{color};")  # 名字用成员配色,和卡片一致
+            b.clicked.connect(lambda _=False, n=name: self.picked.emit(n))
+            lay.addWidget(b)
+
+
 class Panel(QWidget):
     member_clicked = Signal(str)    # 点整条横条:仅运行后置前
     start_requested = Signal(str, object)   # (name, session_id|None):点「确定」后拉起
