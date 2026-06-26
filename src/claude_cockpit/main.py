@@ -25,6 +25,23 @@ def newly_pending(prev: set[str], cur: set[str]) -> set[str]:
     return cur - prev
 
 
+def tray_popup_decision(has_pending: bool, over_icon: bool, over_popup: bool,
+                        visible: bool, misses: int, miss_limit: int) -> str:
+    """托盘悬停浮层的显隐判定(纯逻辑,Qt 几何由调用方算好传进来)。
+    返回 "show"(该显示) / "hide"(该隐藏) / "none"(保持不动)。
+    - 没有 pending → 在显示就 hide,否则 none。
+    - 光标在图标上、浮层还没显示 → show。
+    - 浮层在显示、光标既不在图标也不在浮层、且连续 miss 达阈值 → hide(给宽限避免缝隙闪烁)。
+    - 其余保持不动。"""
+    if not has_pending:
+        return "hide" if visible else "none"
+    if over_icon and not visible:
+        return "show"
+    if visible and not over_icon and not over_popup and misses >= miss_limit:
+        return "hide"
+    return "none"
+
+
 def _config_path() -> Path:
     # v1:用项目根 / 当前目录的 agents.yaml;后续可加 --config
     root = Path(__file__).resolve().parent.parent.parent
