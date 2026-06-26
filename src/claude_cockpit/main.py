@@ -448,6 +448,9 @@ def main() -> int:
         pop.picked.connect(_on_popup_pick)
         pop.adjustSize()
         r = tray.geometry()
+        if r.isNull() or r.isEmpty():   # 几何失准(溢出区等)→ 不弹,避免错位到屏角
+            pop.deleteLater()
+            return
         x = r.right() - pop.width()     # 右边缘对齐图标
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         g = screen.availableGeometry() if screen is not None else None
