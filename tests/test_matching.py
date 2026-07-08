@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from claude_cockpit.config import Member
-from claude_cockpit.matching import match_pending
+from claude_cockpit.matching import match_pending, sessions_for_cwd
 
 
 def _m(name, cwd):
@@ -41,3 +41,27 @@ def test_missing_cwd_ignored(tmp_path):
     a.mkdir()
     members = [_m("alpha", a)]
     assert match_pending([{"session_id": "s1"}], members) == set()
+
+
+def test_sessions_for_cwd_collects_all_matching(tmp_path):
+    a = tmp_path / "a"
+    a.mkdir()
+    recs = [
+        {"session_id": "s1", "cwd": str(a)},
+        {"session_id": "s2", "cwd": str(a).replace("\\", "/").upper() + "/"},
+        {"session_id": "s3", "cwd": str(tmp_path / "elsewhere")},
+    ]
+    # 同一 cwd 的所有会话都要收上来(分隔符/大小写/尾斜杠归一),别的不收
+    assert sorted(sessions_for_cwd(recs, a)) == ["s1", "s2"]
+
+
+def test_sessions_for_cwd_skips_bad_records(tmp_path):
+    a = tmp_path / "a"
+    a.mkdir()
+    recs = [
+        {"session_id": "s1", "cwd": str(a)},
+        {"cwd": str(a)},                 # 无 session_id
+        {"session_id": "s2"},            # 无 cwd
+        "not-a-dict",
+    ]
+    assert sessions_for_cwd(recs, a) == ["s1"]

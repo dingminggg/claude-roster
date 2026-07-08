@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from . import cc_signals, dialogs, sessions, settings, sound, store, winman
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
-from .matching import match_pending, norm_path
+from .matching import match_pending, norm_path, sessions_for_cwd
 from .panel import ICON_PATH, Panel, TrayPopup
 
 
@@ -182,10 +182,20 @@ def main() -> int:
         m = by_name.get(name)
         if m is None:
             return
-        target = norm_path(m.cwd)
-        for rec in cc_signals.read_turn_ended_full():
-            if norm_path(rec.get("cwd", "")) == target and rec.get("session_id"):
-                cc_signals.clear_turn_ended(rec["session_id"])
+        for sid in sessions_for_cwd(cc_signals.read_turn_ended_full(), m.cwd):
+            cc_signals.clear_turn_ended(sid)
+
+    def _purge_signals(name: str) -> None:
+        """成员的控制台窗口已被关掉:它两条通道的信号都成了孤儿(Stop/UserPromptSubmit
+        不会再触发清除),按 cwd 把 turn-ended + pending 全清掉。否则托盘会一直空闪却无处
+        可点——卡片已置灰(点了 no-op)、悬停浮层点它也 no-op,只能干等 30min prune。"""
+        m = by_name.get(name)
+        if m is None:
+            return
+        for sid in sessions_for_cwd(cc_signals.read_turn_ended_full(), m.cwd):
+            cc_signals.clear_turn_ended(sid)
+        for sid in sessions_for_cwd(cc_signals.read_pending_full(), m.cwd):
+            cc_signals.clear_pending(sid)
 
     def on_row_click(name: str) -> None:
         """点成员横条:已运行 → 先把其它还活着的控制台最小化(多屏下都最大化时
@@ -325,6 +335,7 @@ def main() -> int:
         if dead:
             for n in dead:
                 hwnds.pop(n, None)
+                _purge_signals(n)       # 关窗即清孤儿信号:托盘别再空闪(死窗口没处可点)
             store.save(hwnds)
         cc_signals.prune_turn_ended()       # 清掉没触发 clear 的陈旧「该你看了」
         # 同样清陈旧 pending:会话在权限确认中被关掉时 Stop/UserPromptSubmit 不会触发清除,

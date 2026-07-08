@@ -28,3 +28,12 @@ def match_pending(pending: list[dict], members: list[Member]) -> set[str]:
         if name:
             hit.add(name)
     return hit
+
+
+def sessions_for_cwd(records: list[dict], cwd: str | os.PathLike) -> list[str]:
+    """给定一批信号记录,返回落在目标 cwd 下的所有 session_id(cwd 归一后精确比对)。
+    用于「按成员清信号」:标记已读、以及关窗后清孤儿信号。"""
+    target = _norm(cwd)
+    return [rec["session_id"] for rec in records
+            if isinstance(rec, dict) and rec.get("session_id")
+            and _norm(rec.get("cwd", "")) == target]
