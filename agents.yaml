@@ -47,3 +47,23 @@ agents:
   emoji: 🤖
   color: '#3b82f6'
   permission_mode: default
+- name: pq
+  cwd: C:\Users\LQ\PhpstormProjects\pq-backend
+  emoji: 🤖
+  color: '#3b82f6'
+  permission_mode: default
+- name: diy-bot
+  cwd: C:\Users\LQ\PhpstormProjects\diy-bot
+  emoji: 🤖
+  color: '#3b82f6'
+  permission_mode: default
+- name: etl
+  cwd: C:\Users\LQ\PhpstormProjects\etl
+  emoji: 🤖
+  color: '#3b82f6'
+  permission_mode: default
+- name: frog
+  cwd: C:\Users\LQ\PhpstormProjects\desk-buddy
+  emoji: 🤖
+  color: '#3b82f6'
+  permission_mode: default
