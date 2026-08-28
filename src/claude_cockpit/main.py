@@ -50,6 +50,54 @@ def _config_path() -> Path:
 
 
 _SINGLE_KEY = "claude-cockpit-single-instance"
+# 点开某会话时,让 TTS 朗读它最新一条已备好的回复(激活即播,没开就一直等)。
+_TTS_SCRIPT = Path.home() / ".claude" / "hooks" / "tts_stop.py"
+
+
+def _pid_alive(pid: int) -> bool:
+    """Windows:进程是否还活着(判断某条朗读信号是否仍在播;死了就清孤儿,🔊 不常亮)。"""
+    if pid <= 0:
+        return False
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259   # STILL_ACTIVE
+    except Exception:
+        return False
+
+
+def _run_tts(*extra) -> None:
+    """后台跑 tts_stop.py <extra...>(不弹窗、不阻塞 UI)。"""
+    if not _TTS_SCRIPT.exists():
+        return
+    try:
+        import subprocess
+        flags = 0
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            [sys.executable, str(_TTS_SCRIPT), *[str(a) for a in extra]],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, creationflags=flags,
+        )
+    except Exception:
+        pass
+
+
+def speak_on_activate(cwd) -> None:
+    """点开成员卡时触发:调 tts_stop.py 合成并朗读该 cwd 最新一条回复(存在才播)。"""
+    _run_tts("activate", cwd)
+
+
+def stop_speaking() -> None:
+    """点朗读中的 🔊:停止当前播放(tts_stop.py stop 会杀播放进程并清 🔊 信号)。"""
+    _run_tts("stop")
 
 
 def main() -> int:
@@ -93,6 +141,7 @@ def main() -> int:
     last_order: list[str] = []
     blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
     cur_pending: set[str] = set()       # 当前「该你看了」的成员(tick 刷新)
+    cur_speaking: set[str] = set()      # 当前「正在朗读」的成员(TTS 播放中,tick 刷新)
     # 「逐个点掉」:点过某张卡 / 在悬停浮层里点过某成员 → 它的 ✉ 停闪,且不再计入托盘闪烁
     # (本地标记,不删信号文件,故权限 pending 仍留到真去答时清)。成员离开 pending 后自动复位。
     # 统一口径:托盘闪烁、卡片信封、悬停浮层都看 cur_pending - card_read,逐个点掉、全点完才停。
@@ -134,6 +183,10 @@ def main() -> int:
                               states[m.name] == "running"
                               and m.name in cur_pending
                               and m.name not in card_read)
+            # 正在朗读:窗口还在 且 TTS 在播这个会话 → 卡上显示 🔊
+            panel.set_speaking(m.name,
+                               states[m.name] == "running"
+                               and m.name in cur_speaking)
             # 刚回到/初次为「未运行」→ 刷新它的会话下拉(避免每 tick 重扫文件)
             if states[m.name] == "down" and member_states.get(m.name) != "down":
                 _refresh_sessions(m.name)
@@ -214,6 +267,9 @@ def main() -> int:
             winman.maximize(h)              # 点谁就把谁最大化(不再自动弹)
             _dismiss(name)
             _refresh_states()               # 立刻让信封消失,不等下一个 tick(~1s)
+            m = by_name.get(name)           # 激活即朗读该会话最新一条回复(存在才播)
+            if m is not None:
+                speak_on_activate(m.cwd)
 
     def on_start(name: str, session_id=None) -> None:
         """面板里点「启动」→「确定」后发来 (name, session_id):拉起控制台。
@@ -245,6 +301,7 @@ def main() -> int:
 
     panel.member_clicked.connect(on_row_click)
     panel.start_requested.connect(on_start)
+    panel.stop_speaking_requested.connect(lambda _name: stop_speaking())
 
     def _persist_and_rebuild() -> None:
         nonlocal last_order
@@ -348,13 +405,35 @@ def main() -> int:
         # 提示音:有成员「新进入」pending 就响一声(与信封/托盘开始闪同一时刻)。
         # 首个 tick 只播种 prev_pending 不响,避免开机时对遗留 pending 一通叫。
         nonlocal prev_pending
-        if prev_pending is not None:
-            if sound_enabled and newly_pending(prev_pending, pending):
-                sound.play()
+        newly = newly_pending(prev_pending, pending) if prev_pending is not None else set()
+        if newly and sound_enabled:
+            sound.play()
+        # 前台会话免点播报:新进 pending 的成员,若它的控制台此刻正是前台窗口——
+        # 用户已经在盯着它,不需要再点一下卡片才触发朗读(那一下纯属多余,且用户不会点
+        # 自己已经在看的会话,导致这类会话永远等不到激活播放)。tts_stop.py 的 activate
+        # 本身按「有没有未播的新音频」判断,没有就静默返回,重复调用无副作用。
+        if newly:
+            fg = winman.get_foreground_hwnd()
+            if fg is not None:
+                for name in newly:
+                    m = by_name.get(name)
+                    if m is not None and _live_hwnd(name) == fg:
+                        speak_on_activate(m.cwd)
         prev_pending = set(pending)
         cur_pending.clear()
         cur_pending.update(pending)
         card_read.intersection_update(pending)  # 不再 pending 的复位 → 新一轮 pending 重新闪/亮
+        # 「正在朗读」:TTS 播放期间写 speaking/<cwd>.json {cwd,pid};pid 活着才显示 🔊,
+        # 死了(播完/被杀)就删孤儿。先裁超龄的,再按 pid 存活过滤。
+        cc_signals.prune_speaking()
+        live_speaking = []
+        for rec in cc_signals.read_speaking_full():
+            if _pid_alive(int(rec.get("pid") or 0)):
+                live_speaking.append(rec)
+            else:
+                cc_signals.remove_speaking_file(rec.get("cwd", "") or "")
+        cur_speaking.clear()
+        cur_speaking.update(match_pending(live_speaking, members))
         # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
         _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
         # 名字下面那行:用缓存的活句柄直接读控制台标题(claude 起来后会改成它的状态)

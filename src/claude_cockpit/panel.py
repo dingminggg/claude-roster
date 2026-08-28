@@ -31,6 +31,7 @@ QLabel#subtitle { color:#6e7682; font-size:11px; }
 QFrame#card { background:#22252d; border-radius:10px; }
 QFrame#card:hover { background:#2b2f3a; }
 QLabel#env { color:#ffffff; font-size:26px; font-weight:bold; background:transparent; }
+QLabel#spk { font-size:15px; background:transparent; }
 QFrame#addcard {
     background:transparent; border:1px dashed #3a3f4b; border-radius:10px;
 }
@@ -314,8 +315,30 @@ class TrayPopup(QFrame):
             lay.addWidget(b)
 
 
+class _SpkLabel(QLabel):
+    """卡片上的「正在朗读」🔊:朗读时可点击停止播放;非朗读态点击穿透给整卡(照常置前)。"""
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._active = False
+
+    def set_active(self, on: bool) -> None:
+        self._active = on
+        self.setCursor(Qt.CursorShape.PointingHandCursor if on
+                       else Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, e):
+        if self._active and e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            e.accept()                      # 吃掉事件,别再触发整卡点击(置前/重播)
+        else:
+            super().mousePressEvent(e)      # 默认 ignore → 冒泡给整卡
+
+
 class Panel(QWidget):
     member_clicked = Signal(str)    # 点整条横条:仅运行后置前
+    stop_speaking_requested = Signal(str)   # 点朗读中的 🔊:停止当前播放
     start_requested = Signal(str, object)   # (name, session_id|None):点「确定」后拉起
     add_requested = Signal()
     edit_requested = Signal(str)
@@ -336,6 +359,7 @@ class Panel(QWidget):
 
         self._gos: dict[str, QPushButton] = {}
         self._envs: dict[str, QLabel] = {}     # 每行的「有新消息」小信封
+        self._spks: dict[str, QLabel] = {}     # 每行的「正在朗读」🔊(TTS 播放中)
         self._ctitles: dict[str, QLabel] = {}  # 名字下面那行:成员会话的实时窗口标题
         self._ctitle_raw: dict[str, str] = {}  # 标题原文(用于宽度变化时重新省略)
         self._pickers: dict[str, "_SessionPicker"] = {}  # 未运行成员的会话下拉
@@ -416,6 +440,15 @@ class Panel(QWidget):
         env.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row1.addWidget(env, 0, Qt.AlignmentFlag.AlignVCenter)
         self._envs[m.name] = env
+
+        # 「正在朗读」🔊:紧跟信封,始终占位(固定宽),只切换 🔊/空,稳态不闪;朗读时可点停
+        spk = _SpkLabel()
+        spk.setObjectName("spk")
+        spk.setFixedSize(22, 22)
+        spk.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        spk.clicked.connect(lambda n=m.name: self.stop_speaking_requested.emit(n))
+        row1.addWidget(spk, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._spks[m.name] = spk
         row1.addStretch(1)
         col.addLayout(row1)
 
@@ -486,6 +519,7 @@ class Panel(QWidget):
                 w.deleteLater()
         self._gos.clear()
         self._envs.clear()
+        self._spks.clear()
         self._ctitles.clear()
         self._ctitle_raw.clear()
         self._pickers.clear()
@@ -563,6 +597,16 @@ class Panel(QWidget):
             self._msg_on.discard(name)
         env.setToolTip("有新消息 · 点这张卡查看并已读" if on else "")
         self._apply_dot(name)
+
+    def set_speaking(self, name: str, on: bool) -> None:
+        """切换这一行的「正在朗读」🔊(TTS 播放期间);稳态显示,不闪。朗读时点它可停止播放。"""
+        lbl = self._spks.get(name)
+        if lbl is None:
+            return
+        lbl.setText("🔊" if on else "")
+        lbl.setToolTip("正在朗读 · 点击停止播放" if on else "")
+        if isinstance(lbl, _SpkLabel):
+            lbl.set_active(on)
 
     def set_title(self, name: str, text: str) -> None:
         """名字下面那行:成员会话控制台的实时窗口标题。

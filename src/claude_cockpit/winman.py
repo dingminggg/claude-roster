@@ -51,6 +51,15 @@ def get_title(hwnd: int) -> str:
         return ""
 
 
+def get_foreground_hwnd() -> int | None:
+    """当前前台(用户正盯着的)窗口句柄;拿不到返回 None。"""
+    try:
+        h = user32.GetForegroundWindow()
+        return h if h else None
+    except Exception:
+        return None
+
+
 def is_window(hwnd: int) -> bool:
     """句柄是否仍指向一个存在的窗口(用户关掉控制台后即失效)。"""
     try:

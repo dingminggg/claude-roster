@@ -154,3 +154,38 @@ def read_turn_ended_full() -> list[dict]:
 
 def prune_turn_ended(max_age_seconds: int = 1800) -> None:
     _prune(turn_dir(), max_age_seconds)
+
+
+# ── 「正在朗读」信号:TTS(~/.claude/hooks/tts_stop.py)播放某会话回复期间写入,播完删。──
+# 记录含 {cwd, pid}:cwd 用来匹配成员显示 🔊,pid 让消费方自愈(播放进程没了就丢弃,不会常亮)。
+# 只读,不写(写在 TTS 脚本侧)。
+def speaking_dir() -> Path:
+    return data_dir() / "speaking"
+
+
+def read_speaking_full() -> list[dict]:
+    """[{cwd, pid, at}, ...]。不同于 pending/turn-ended,朗读信号按 cwd 记录(无 session_id)。"""
+    d = speaking_dir()
+    if not d.exists():
+        return []
+    out: list[dict] = []
+    for f in d.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("cwd"):
+            out.append(data)
+    return out
+
+
+def remove_speaking_file(cwd: str) -> None:
+    """按 cwd 删掉一条朗读信号(消费方发现进程已死时清理孤儿用)。"""
+    try:
+        (speaking_dir() / f"{_safe_name(cwd)}.json").unlink()
+    except (FileNotFoundError, OSError):
+        pass
+
+
+def prune_speaking(max_age_seconds: int = 1800) -> None:
+    _prune(speaking_dir(), max_age_seconds)
