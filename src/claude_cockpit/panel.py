@@ -350,12 +350,13 @@ class Panel(QWidget):
         super().__init__()
         self.setObjectName("panel")
         self.setWindowTitle("Claude 花名册")
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)  # 不给最大化
         self.setStyleSheet(_QSS)
         self.setFixedWidth(310)             # 固定宽度,只允许竖向随成员数伸缩
         if ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(ICON_PATH)))
+
+        self._always_on_top = False
 
         self._gos: dict[str, QPushButton] = {}
         self._envs: dict[str, QLabel] = {}     # 每行的「有新消息」小信封
@@ -681,6 +682,17 @@ class Panel(QWidget):
             go.setText("启动")
             go.setStyleSheet("")                # 回退到 #go 默认样式
             go.setToolTip("启动这个成员的控制台")
+
+    def set_always_on_top(self, on: bool) -> None:
+        """切换「置顶」。改 WindowStaysOnTopHint 后 Windows 需要重新 show() 才生效,
+        重开时机会丢失当前显隐/位置,所以只在确有变化且窗口可见时才重开。"""
+        if on == self._always_on_top:
+            return
+        self._always_on_top = on
+        was_visible = self.isVisible()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
+        if was_visible:
+            self.show()
 
     def showEvent(self, e):
         super().showEvent(e)

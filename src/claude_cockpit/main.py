@@ -155,7 +155,10 @@ def main() -> int:
 
     # 提示音:有新成员进入 pending 就响一声。prev_pending 记上一轮 pending,
     # None 表示首个 tick → 只播种不响(避免开机时对遗留 pending 一通叫)。
-    sound_enabled = settings.load().get("sound_enabled", True)
+    _settings = settings.load()
+    sound_enabled = _settings.get("sound_enabled", True)
+    always_on_top = _settings.get("always_on_top", True)
+    panel.set_always_on_top(always_on_top)
     prev_pending: set[str] | None = None
 
     def _live_hwnd(name: str) -> int | None:
@@ -470,12 +473,24 @@ def main() -> int:
         """勾选/取消「提示音」→ 改运行时开关 + 存盘。"""
         nonlocal sound_enabled
         sound_enabled = checked
-        settings.save({"sound_enabled": checked})
+        settings.save({**settings.load(), "sound_enabled": checked})
 
     sound_action = menu.addAction("提示音")
     sound_action.setCheckable(True)
     sound_action.setChecked(sound_enabled)
     sound_action.toggled.connect(_toggle_sound)
+
+    def _toggle_always_on_top(checked: bool) -> None:
+        """勾选/取消「窗口置顶」→ 改面板窗口标志 + 存盘。"""
+        nonlocal always_on_top
+        always_on_top = checked
+        panel.set_always_on_top(checked)
+        settings.save({**settings.load(), "always_on_top": checked})
+
+    top_action = menu.addAction("窗口置顶")
+    top_action.setCheckable(True)
+    top_action.setChecked(always_on_top)
+    top_action.toggled.connect(_toggle_always_on_top)
 
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)

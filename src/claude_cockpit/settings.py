@@ -1,4 +1,4 @@
-"""面板的小设置(目前仅「提示音开关」),落盘到 settings.json。
+"""面板的小设置(提示音开关 / 是否置顶),落盘到 settings.json。
 
 与 store.py(窗口句柄缓存)分开:各管各的,互不污染。load() 永远返回补齐默认键的
 完整 dict,调用方不必自己兜底;文件缺失/损坏 → 全默认。
@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-_DEFAULTS = {"sound_enabled": True}
+_DEFAULTS = {"sound_enabled": True, "always_on_top": True}
 
 
 def _path() -> Path:
