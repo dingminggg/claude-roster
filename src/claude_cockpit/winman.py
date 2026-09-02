@@ -16,19 +16,35 @@ SW_MAXIMIZE = 3
 _EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
-def find_by_title(needle: str) -> int | None:
-    """返回标题里包含 needle 的第一个可见窗口句柄;找不到返回 None。"""
+def title_matches(title: str, needle: str) -> bool:
+    """标题里是否有「完整的」needle:命中处后面必须是结尾或空白。
+    纯子串匹配会让 CCKPT:fad 抓到 CCKPT:fad-3 的窗口(两成员共用一个句柄的历史 bug),
+    所以名字后面紧跟 -/数字/字母 一律不算。前后允许宿主加的装饰(如 "Administrator: ")。"""
+    start = 0
+    while True:
+        i = title.find(needle, start)
+        if i < 0:
+            return False
+        j = i + len(needle)
+        if j >= len(title) or title[j].isspace():
+            return True
+        start = i + 1
+
+
+def find_by_title(needle: str, exclude: set[int] | frozenset[int] = frozenset()) -> int | None:
+    """返回标题完整包含 needle 的第一个可见窗口句柄;找不到返回 None。
+    exclude:已归属其它成员的句柄,跳过——防止把别人的控制台再抓一遍。"""
     found: list[int] = []
 
     def cb(hwnd, _):
-        if not user32.IsWindowVisible(hwnd):
+        if hwnd in exclude or not user32.IsWindowVisible(hwnd):
             return True
         n = user32.GetWindowTextLengthW(hwnd)
         if n <= 0:
             return True
         buf = ctypes.create_unicode_buffer(n + 1)
         user32.GetWindowTextW(hwnd, buf, n + 1)
-        if needle in buf.value:
+        if title_matches(buf.value, needle):
             found.append(hwnd)
             return False  # 停止枚举
         return True

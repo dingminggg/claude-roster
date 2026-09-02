@@ -129,10 +129,10 @@ def main() -> int:
     by_name = {m.name: m for m in members}
     # name -> 控制台窗口句柄。落盘缓存:退出/重启 cockpit 后载回,凡是句柄仍指向
     # 一个存活的控制台窗口就复用(置前 / 屏蔽 ▶),不必重开;失效的丢弃。
-    hwnds: dict[str, int] = {
+    hwnds: dict[str, int] = store.dedupe({
         n: h for n, h in store.load().items()
         if n in by_name and winman.is_window(h) and winman.is_console_window(h)
-    }
+    })
 
     # 正在启动中的成员:name -> 已轮询次数。控制台从点击到出现有 ~3s 空窗,
     # 期间卡片显示「启动中」给反馈;窗口一抓到就转「运行中」。
@@ -217,7 +217,9 @@ def main() -> int:
             if m is None:
                 done.append(name)
                 continue
-            h = winman.find_by_title(window_title(m))
+            # 排除其它成员已持有的活句柄:绝不让两个成员指向同一个控制台
+            taken = {oh for on, oh in hwnds.items() if on != name and winman.is_window(oh)}
+            h = winman.find_by_title(window_title(m), exclude=taken)
             if h:
                 hwnds[name] = h
                 store.save(hwnds)

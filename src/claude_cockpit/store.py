@@ -22,6 +22,19 @@ def load() -> dict[str, int]:
         return {}
 
 
+def dedupe(hwnds: dict[str, int]) -> dict[str, int]:
+    """同一句柄被多个成员缓存时只认最早写入的那个:后来者是误抓(抓句柄时
+    子串匹配到了兄弟成员的窗口),点它会弹出别人的会话。"""
+    seen: set[int] = set()
+    out: dict[str, int] = {}
+    for n, h in hwnds.items():
+        if h in seen:
+            continue
+        seen.add(h)
+        out[n] = h
+    return out
+
+
 def save(hwnds: dict[str, int]) -> None:
     """落盘(原子性要求不高,失败静默)。"""
     p = _path()
