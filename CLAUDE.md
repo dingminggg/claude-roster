@@ -9,7 +9,7 @@
 ```bash
 # 启动(无窗后台)
 C:\Users\LQ\PhpstormProjects\claude-cockpit\.venv\Scripts\pythonw.exe -m claude_cockpit.main
-# 测试(纯逻辑 22 个)
+# 测试(纯逻辑 70 个)
 QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest -q
 # 离屏渲染面板截图自检;GBK 控制台打印 emoji 要加 PYTHONIOENCODING=utf-8
 ```
