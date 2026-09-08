@@ -9,7 +9,7 @@
 ```bash
 # 启动(无窗后台)
 C:\Users\LQ\PhpstormProjects\claude-cockpit\.venv\Scripts\pythonw.exe -m claude_cockpit.main
-# 测试(纯逻辑 70 个)
+# 测试(96 个)
 QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest -q
 # 离屏渲染面板截图自检;GBK 控制台打印 emoji 要加 PYTHONIOENCODING=utf-8
 ```
@@ -27,7 +27,8 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 - **sound.py** — `play()` 播自带 `assets/guagua.mp3`(从小青蛙搬来,本项目自带不依赖它),用 `QMediaPlayer`,失败回退 `winsound` 蜂鸣,异常全吞。
 - **cc_signals.py** — 文件信号,**两条独立通道**(见下)。
 - **matching.py** — `match_pending(records, members)` 按规范化 cwd 把信号对到成员;`norm_path`。
-- **panel.py** — 深色面板 UI:成员卡、运行键胶囊、内联确认、闪动信封、固定宽 310。
+- **peers.py** — 读 `~/.claude/sessions/<pid>.json` 探「同机 Claude 会话」:`read_peers()` 拿 cwd/会话名/忙闲,`match_peers()` 按规范化 cwd 对到成员(复用 `matching.norm_path`,与 `match_pending` 同口径)。判活 = `pid_alive()` + `updatedAt` 30min 时效兜底(pid 会被系统复用,光看 pid 会把陈旧残留当活会话);同一 cwd 多会话取 `updated_at` 最大的那个。**那批 json 是 Claude Code 的内部文件、不是公开契约**,所以本模块只读不写、异常全吞:探不到就返回空,面板退回兜底的「运行中」,不影响任何既有功能。
+- **panel.py** — 深色面板 UI:成员卡、运行键胶囊(四态+兜底)、内联确认、闪动信封、固定宽 310;导出 `UP_STATES`(起来了的那几个状态,明暗/手型/信封统一按它判断,别再散着写 `== "running"`)。右键菜单由 `_Card.build_menu()` 单独搭出来(不在 `contextMenuEvent` 里现搭——`exec` 阻塞,不抽出来没法单测)。
 - **hooks/** — `turn_ended.py`(Stop 写)、`clear.py`(UserPromptSubmit 清)。
 - **main.py** — 装配:配置/面板/轮询(1s tick + 200ms 启动轮询 + 550ms 托盘闪)/窗口管理/托盘/单实例。
 
@@ -50,7 +51,8 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 ## 当前交互行为
 
 - **启动**:点「启动」→ 原地换成「确定/取消」内联确认(不弹窗)→ 确定才拉起。启动是非阻塞的:立刻显示「启动中」,200ms 快轮询**趁 claude 改标题前**抓 HWND 落盘,再转「运行中」。
-- **运行键三态**同宽胶囊:`启动`(未运行,灰)/ `启动中`(琥珀)/ `运行中`(绿)。未运行的卡整张置灰、排后;运行中点亮、排前。
+- **运行键四态**同宽胶囊(56×22,只换文字配色,右侧始终对齐一列):`启动`(未运行,灰)/ `启动中`(琥珀,还没起来)/ `忙碌中`(蓝,起来了正在干活)/ `空闲`(绿,可以找它了)。忙/闲来自 `peers` 探到的会话状态;**窗口活着但探不到状态时兜底显示 `运行中`(绿),绝不退化成「未运行」**(否则会重复开空白窗口,见硬约束 3)。未运行的卡整张置灰、排后;起来了的点亮、排前——`main._RANK` 里忙和闲**同档**,忙闲切换不会让卡片上下乱跳。
+- **右键成员卡**:`复制会话地址`(把该成员的会话名塞进剪贴板,就是会话间发消息用的地址;成员名 ≠ 会话名,成员叫 `fad-2`、会话叫 `fad-backend-2-f3`,不给出来对不上)/ 打开目录 / 编辑 / 删除。探不到地址时该项**置灰而不是隐藏**(隐藏用户会以为功能没了),tooltip 说明原因。
 - **有新消息**(答完一轮/等权限):名字后面一个**白色小信封 ✉ 闪烁**(550ms)+ **托盘图标闪** + **响一声提示音**(成员「新进入」pending 时响一声,首个 tick 静默播种避免开机狂叫;托盘菜单「提示音」可关,存 settings.json)。
 - **点成员横条**(仅运行中):把它的控制台 **maximize 最大化**弹到眼前 + 标记已读(✉ 消失)+ 停闪。**注意不要用 bring_to_front**——它带 `SW_RESTORE` 会把最大化还原。未运行点横条无反应(只有「启动」键能开)。
 - **托盘闪烁** = `cur_pending - acked` 非空才闪;点托盘图标或点任一卡 → ack 停闪(列表里各自的 ✉ 仍在,逐个点掉);新成员答完会重新闪。

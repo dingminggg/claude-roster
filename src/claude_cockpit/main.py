@@ -12,11 +12,11 @@ from PySide6.QtWidgets import (
     QApplication, QMenu, QMessageBox, QSystemTrayIcon,
 )
 
-from . import cc_signals, dialogs, sessions, settings, sound, store, winman
+from . import cc_signals, dialogs, peers, sessions, settings, sound, store, winman
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
 from .matching import match_pending, norm_path, sessions_for_cwd
-from .panel import ICON_PATH, Panel, TrayPopup
+from .panel import ICON_PATH, UP_STATES, Panel, TrayPopup
 
 
 def newly_pending(prev: set[str], cur: set[str]) -> set[str]:
@@ -137,6 +137,9 @@ def main() -> int:
     # 正在启动中的成员:name -> 已轮询次数。控制台从点击到出现有 ~3s 空窗,
     # 期间卡片显示「启动中」给反馈;窗口一抓到就转「运行中」。
     launching: dict[str, int] = {}
+    # 探到的同机 Claude 会话(成员名 -> Peer),tick 刷新。给两处用:
+    # 运行键的 忙碌中/空闲,以及右键「复制会话地址」。探不到就是空的,一切照旧。
+    cur_peers: dict[str, "peers.Peer"] = {}
     member_states: dict[str, str] = {}      # 上一轮各成员状态,用于「刚回到未运行」时刷下拉
     last_order: list[str] = []
     blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
@@ -167,12 +170,17 @@ def main() -> int:
 
     def _state_of(name: str) -> str:
         if _live_hwnd(name) is not None:
-            return "running"
+            # 窗口活着 = 起来了;再看探到的会话状态细分忙/闲。
+            # 探不到(会话 json 还没落、格式变了)→ 兜底「运行中」,不退化成未运行。
+            p = cur_peers.get(name)
+            status = p.status if p is not None else ""
+            return status if status in ("busy", "idle") else "running"
         if name in launching:
             return "launching"
         return "down"
 
-    _RANK = {"running": 0, "launching": 1, "down": 2}
+    # 排序只分「起来了 / 启动中 / 未运行」三档:忙和闲同档,别让卡片因为忙闲切换乱跳。
+    _RANK = {"running": 0, "busy": 0, "idle": 0, "launching": 1, "down": 2}
 
     def _refresh_states() -> None:
         """刷新每张卡的明暗/运行键,并把运行中/启动中的卡排到前面。"""
@@ -183,12 +191,12 @@ def main() -> int:
             panel.set_run_state(m.name, states[m.name])
             # 有新消息小信封:窗口还在 且 答完一轮/等你 且 这张卡还没被点掉
             panel.set_message(m.name,
-                              states[m.name] == "running"
+                              states[m.name] in UP_STATES
                               and m.name in cur_pending
                               and m.name not in card_read)
             # 正在朗读:窗口还在 且 TTS 在播这个会话 → 卡上显示 🔊
             panel.set_speaking(m.name,
-                               states[m.name] == "running"
+                               states[m.name] in UP_STATES
                                and m.name in cur_speaking)
             # 刚回到/初次为「未运行」→ 刷新它的会话下拉(避免每 tick 重扫文件)
             if states[m.name] == "down" and member_states.get(m.name) != "down":
@@ -385,10 +393,18 @@ def main() -> int:
         except Exception as e:
             QMessageBox.warning(panel, "打不开目录", str(e))
 
+    def on_copy_address(name: str) -> None:
+        """右键「复制会话地址」:把会话名塞进剪贴板,用户可直接拿去给别的会话发消息。"""
+        p = cur_peers.get(name)
+        if p is None:                       # 菜单项本来就置灰,这里只是兜底
+            return
+        QGuiApplication.clipboard().setText(p.name)
+
     panel.add_requested.connect(on_add)
     panel.edit_requested.connect(on_edit)
     panel.delete_requested.connect(on_delete)
     panel.open_dir_requested.connect(on_open_dir)
+    panel.copy_address_requested.connect(on_copy_address)
     panel.delete_session_requested.connect(on_delete_session)
 
     def tick() -> None:
@@ -439,6 +455,13 @@ def main() -> int:
                 cc_signals.remove_speaking_file(rec.get("cwd", "") or "")
         cur_speaking.clear()
         cur_speaking.update(match_pending(live_speaking, members))
+        # 探同机 Claude 会话:拿会话名(发消息的地址)和忙/闲。必须在 _refresh_states
+        # 之前刷,_state_of 要用它细分忙/闲。读不到就清空 → 一切退回原来的「运行中」。
+        cur_peers.clear()
+        cur_peers.update(peers.match_peers(peers.read_peers(), members))
+        for m in members:
+            p = cur_peers.get(m.name)
+            panel.set_address(m.name, p.name if p is not None else None)
         # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
         _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
         # 名字下面那行:用缓存的活句柄直接读控制台标题(claude 起来后会改成它的状态)

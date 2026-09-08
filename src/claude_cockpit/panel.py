@@ -5,10 +5,10 @@
 
 对外接口(main 依赖):
   Panel(members) / set_run_state(name,state) / set_sessions(name,sessions) /
-  set_order(names) / rebuild(members)
+  set_address(name,addr) / set_order(names) / rebuild(members)
   信号:member_clicked(str)、start_requested(str, object)、add_requested()、
         edit_requested(str)、delete_requested(str)、open_dir_requested(str)、
-        delete_session_requested(str, str)
+        delete_session_requested(str, str)、copy_address_requested(str)
 """
 from __future__ import annotations
 
@@ -89,24 +89,33 @@ _TRAY_POPUP_MARGIN = 4          # 外层只留极小边,够把 hover 高亮收�
 
 # 未运行的卡片整张置灰(半透明),运行中/启动中恢复全亮
 _DIM = 0.4
-# 运行中:绿色胶囊
+# 空闲(答完在等你)/ 探不到状态的兜底「运行中」:绿色胶囊
 _RUNNING_QSS = ("color:#9be6b4; background:#1f3a29; border:none;"
                 " border-radius:11px; font-size:11px; font-weight:600;")
+# 忙碌中(会话正在干活):蓝色胶囊。和「启动中」的琥珀区分开——那是还没起来,
+# 这是起来了正忙;和「空闲」的绿区分开——绿=可以找它了。
+_BUSY_QSS = ("color:#9ec5ff; background:#1e2a3d; border:none;"
+             " border-radius:11px; font-size:11px; font-weight:600;")
+# 「已经起来了」的三种状态:忙/闲是探到会话状态时的细分,running 是探不到时的兜底。
+# 明暗、手型光标、点横条置前一律按这一组判断,别再逐个写 == "running"。
+UP_STATES = ("running", "busy", "idle")
 # 启动中:琥珀胶囊(提示正在拉起,中间这段以前没反馈)
 _LAUNCHING_QSS = ("color:#f1c40f; background:#3a3320; border:none;"
                   " border-radius:11px; font-size:11px; font-weight:600;")
 
 
 class _Card(QFrame):
-    """整卡左键置前/启动;右键弹「编辑/删除」。"""
+    """整卡左键置前/启动;右键弹「复制会话地址/打开目录/编辑/删除」。"""
     clicked = Signal()
     edit = Signal()
     delete = Signal()
     open_dir = Signal()
+    copy_addr = Signal()
 
     def __init__(self):
         super().__init__()
         self.setObjectName("card")
+        self._addr: str | None = None    # 会话地址(会话间发消息用),探不到就是 None
         # 默认不是手型:未运行时整条点了也没反应(只有「启动」键能开)。
         # 运行后由 set_run_state 切成手型,表示「点横条可置前」。
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -116,12 +125,27 @@ class _Card(QFrame):
             self.clicked.emit()
         super().mousePressEvent(e)
 
-    def contextMenuEvent(self, e):
+    def set_addr(self, addr: str | None) -> None:
+        self._addr = addr or None
+
+    def build_menu(self) -> QMenu:
+        """右键菜单。单独抽出来(不在 contextMenuEvent 里现搭)是为了可单测:
+        exec 会阻塞,测试只能拿到菜单本身来断言。"""
         menu = QMenu(self)
+        act = menu.addAction("复制会话地址", self.copy_addr.emit)
+        # 地址来自 ~/.claude/sessions/<pid>.json,会话没起来/版本不给就置灰,
+        # 而不是把这一项藏掉——藏掉用户会以为功能没了。
+        act.setEnabled(self._addr is not None)
+        act.setToolTip(f"复制 {self._addr}(会话间发消息的地址)" if self._addr
+                       else "还没探到这个成员的会话地址(控制台没起来?)")
+        menu.addSeparator()
         menu.addAction("打开目录", self.open_dir.emit)
         menu.addAction("编辑", self.edit.emit)
         menu.addAction("删除", self.delete.emit)
-        menu.exec(e.globalPos())
+        return menu
+
+    def contextMenuEvent(self, e):
+        self.build_menu().exec(e.globalPos())
 
 
 class _AddCard(QFrame):
@@ -344,6 +368,7 @@ class Panel(QWidget):
     edit_requested = Signal(str)
     delete_requested = Signal(str)
     open_dir_requested = Signal(str)    # 右键「打开目录」:用资源管理器开成员 cwd
+    copy_address_requested = Signal(str)    # 右键「复制会话地址」:把会话名塞进剪贴板
     delete_session_requested = Signal(str, str)  # (name, session_id):删该成员某会话记录
 
     def __init__(self, members):
@@ -407,6 +432,7 @@ class Panel(QWidget):
         card.edit.connect(lambda n=m.name: self.edit_requested.emit(n))
         card.delete.connect(lambda n=m.name: self.delete_requested.emit(n))
         card.open_dir.connect(lambda n=m.name: self.open_dir_requested.emit(n))
+        card.copy_addr.connect(lambda n=m.name: self.copy_address_requested.emit(n))
         lay = QHBoxLayout(card)
         lay.setContentsMargins(0, 0, 10, 0)     # 卡片本身不留边,色条好撑满全高;底部空隙放进 col
         lay.setSpacing(10)
@@ -634,8 +660,16 @@ class Panel(QWidget):
         if p is not None:
             p.set_sessions(sessions)
 
+    def set_address(self, name: str, addr: str | None) -> None:
+        """给某成员挂上「会话地址」(会话间发消息用的会话名,来自 peers 探测)。
+        None = 还没探到 → 右键菜单里「复制会话地址」置灰。"""
+        card = self._cards.get(name)
+        if card is not None:
+            card.set_addr(addr)
+
     def set_run_state(self, name: str, state: str) -> None:
-        """state ∈ {down(未运行), launching(启动中), running(运行中)}。
+        """state ∈ {down(未运行), launching(启动中), busy(忙碌中), idle(空闲),
+        running(起来了但探不到忙/闲的兜底)}。
         控制整卡明暗 + 右侧运行键的文字/样式;确认态优先(显示确定/取消)。"""
         if state != "down":                     # 一旦进入启动/运行,确认态作废
             self._confirming.discard(name)
@@ -646,7 +680,7 @@ class Panel(QWidget):
             box.setVisible(confirming)
         card = self._cards.get(name)
         if card is not None:                    # 运行后横条才是手型 + 可点置前
-            card.setCursor(Qt.CursorShape.PointingHandCursor if state == "running"
+            card.setCursor(Qt.CursorShape.PointingHandCursor if state in UP_STATES
                            else Qt.CursorShape.ArrowCursor)
         eff = self._effects.get(name)
         if eff is not None:                     # 确认中也点亮;纯未运行才置灰
@@ -666,12 +700,22 @@ class Panel(QWidget):
         go.setVisible(not confirming)
         if confirming:
             return
-        # 尺寸三态统一(_GO_W×_GO_H),只换文字/配色,右侧始终对齐成一列
-        if state == "running":
+        # 尺寸各态统一(_GO_W×_GO_H),只换文字/配色,右侧始终对齐成一列
+        if state == "busy":
+            go.setEnabled(False)
+            go.setText("忙碌中")
+            go.setStyleSheet(_BUSY_QSS)
+            go.setToolTip("会话正在干活 · 点这张卡置前")
+        elif state == "idle":
+            go.setEnabled(False)
+            go.setText("空闲")
+            go.setStyleSheet(_RUNNING_QSS)
+            go.setToolTip("会话空闲 · 点这张卡置前")
+        elif state == "running":
             go.setEnabled(False)
             go.setText("运行中")
             go.setStyleSheet(_RUNNING_QSS)
-            go.setToolTip("已在运行 · 点这张卡置前")
+            go.setToolTip("已在运行(探不到忙/闲) · 点这张卡置前")
         elif state == "launching":
             go.setEnabled(False)
             go.setText("启动中")
