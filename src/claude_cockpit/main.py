@@ -16,7 +16,8 @@ from . import cc_signals, dialogs, peers, sessions, settings, sound, store, winm
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
 from .matching import match_pending, norm_path, sessions_for_cwd
-from .panel import ICON_PATH, UP_STATES, Panel, TrayPopup
+from .office import OfficeWindow, UP_STATES
+from .panel import ICON_PATH, TrayPopup
 
 
 def newly_pending(prev: set[str], cur: set[str]) -> set[str]:
@@ -125,7 +126,7 @@ def main() -> int:
 
     cfg_path = _config_path()
     members = load_config(cfg_path)
-    panel = Panel(members)
+    panel = OfficeWindow(members)       # 变量名保留 panel:下面几十处引用不动
     by_name = {m.name: m for m in members}
     # name -> 控制台窗口句柄。落盘缓存:退出/重启 cockpit 后载回,凡是句柄仍指向
     # 一个存活的控制台窗口就复用(置前 / 屏蔽 ▶),不必重开;失效的丢弃。
@@ -141,7 +142,6 @@ def main() -> int:
     # 运行键的 忙碌中/空闲,以及右键「复制会话地址」。探不到就是空的,一切照旧。
     cur_peers: dict[str, "peers.Peer"] = {}
     member_states: dict[str, str] = {}      # 上一轮各成员状态,用于「刚回到未运行」时刷下拉
-    last_order: list[str] = []
     blink_state = {"on": False}         # 托盘图标当前是否处于「灭」的那半拍
     cur_pending: set[str] = set()       # 当前「该你看了」的成员(tick 刷新)
     cur_speaking: set[str] = set()      # 当前「正在朗读」的成员(TTS 播放中,tick 刷新)
@@ -179,13 +179,8 @@ def main() -> int:
             return "launching"
         return "down"
 
-    # 排序只分「起来了 / 启动中 / 未运行」三档:忙和闲同档,别让卡片因为忙闲切换乱跳。
-    _RANK = {"running": 0, "busy": 0, "idle": 0, "launching": 1, "down": 2}
-
     def _refresh_states() -> None:
-        """刷新每张卡的明暗/运行键,并把运行中/启动中的卡排到前面。"""
-        nonlocal last_order
-        pos = {m.name: i for i, m in enumerate(members)}
+        """刷新每张卡的明暗/运行键。"""
         states = {m.name: _state_of(m.name) for m in members}
         for m in members:
             panel.set_run_state(m.name, states[m.name])
@@ -202,10 +197,6 @@ def main() -> int:
             if states[m.name] == "down" and member_states.get(m.name) != "down":
                 _refresh_sessions(m.name)
             member_states[m.name] = states[m.name]
-        order = sorted(states, key=lambda n: (_RANK[states[n]], pos[n]))
-        if order != last_order:
-            panel.set_order(order)
-            last_order = order
 
     def start_member(m, session_id=None) -> None:
         """启动一个成员的控制台(不阻塞 UI):立刻标记「启动中」,
@@ -317,13 +308,11 @@ def main() -> int:
     panel.stop_speaking_requested.connect(lambda _name: stop_speaking())
 
     def _persist_and_rebuild() -> None:
-        nonlocal last_order
         try:
             save_config(cfg_path, members)
         except Exception as e:
             QMessageBox.warning(panel, "写回 agents.yaml 失败", str(e))
         panel.rebuild(members)
-        last_order = []                     # 强制重排(卡片已重建)
         member_states.clear()               # 成员增删改后旧状态作废,让下拉重新刷
         _refresh_states()
 
@@ -535,6 +524,7 @@ def main() -> int:
     _empty_icon = QIcon()
 
     def _blink_tick() -> None:
+        panel.tick_blink()                  # 工位屏幕跟着托盘同一拍闪
         if not (cur_pending - card_read):   # 没有「未点掉的待处理」→ 复位
             if blink_state["on"]:
                 blink_state["on"] = False
