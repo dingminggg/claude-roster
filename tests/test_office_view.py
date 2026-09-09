@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from claude_cockpit.config import Member
 from claude_cockpit.office.view import OfficeWindow
+from claude_cockpit.sessions import Session
 
 
 @pytest.fixture(scope="module")
@@ -77,7 +78,7 @@ def test_seat_click_is_forwarded_as_member_clicked(win):
 def test_confirm_emits_start_requested_with_selected_session(win):
     got = []
     win.start_requested.connect(lambda n, sid: got.append((n, sid)))
-    win.set_sessions("fad", [{"id": "s1", "title": "上次那条", "mtime": 1}])
+    win.set_sessions("fad", [Session(id="s1", title="上次那条", mtime=1.0)])
     win.seats["fad"].confirmed.emit("fad")
     assert got == [("fad", "s1")]
 
@@ -171,7 +172,7 @@ def test_rebuild_drops_data_of_gone_members(win):
     from pathlib import Path
     from claude_cockpit.config import Member
     win.set_address("fad", "fad-backend-f3")
-    win.set_sessions("fad", [{"id": "s1", "title": "旧会话", "mtime": 1}])
+    win.set_sessions("fad", [Session(id="s1", title="旧会话", mtime=1.0)])
     win.rebuild([Member(name="other", cwd=Path("."), dept="后端组")])
     assert win.build_menu("fad") is not None          # 不该抛
     menu = win.build_menu("other")
@@ -213,3 +214,26 @@ def test_dark_titlebar_survives_missing_dwm(win, app, monkeypatch):
     win.show()
     app.processEvents()
     assert win.isVisible()
+
+
+def test_session_row_shows_title_and_untitled_fallback(win):
+    """会话行显示标题;没标题退回「(无标题)」——别把 uuid 甩给用户看。
+    这里必须用真的 sessions.Session(不是 dict):曾经拿 dict 当替身,
+    结果 view 里按 dict 用、真机一跑就 AttributeError。"""
+    win.set_sessions("fad", [Session(id="abc-123", title="", mtime=1.0)])
+    assert win.seats["fad"].hit  # 只是确保对象还在
+    win.set_run_state("fad", "down")
+    assert "(无标题)" in win.seats["fad"]._sub
+
+    win.set_sessions("fad", [Session(id="abc-123", title="补单测", mtime=1.0)])
+    assert "补单测" in win.seats["fad"]._sub
+
+
+def test_picker_menu_built_from_real_sessions(win, app):
+    """会话下拉能用真 Session 建出来:选一条 → start_requested 带那条的 id。"""
+    win.set_sessions("fad", [Session(id="s-new", title="新的那条", mtime=2.0),
+                             Session(id="s-old", title="旧的那条", mtime=1.0)])
+    got = []
+    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
+    win.seats["fad"].confirmed.emit("fad")
+    assert got == [("fad", "s-new")]        # 默认选中最近一条

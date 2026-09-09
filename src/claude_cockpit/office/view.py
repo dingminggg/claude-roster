@@ -28,6 +28,12 @@ ZOOM_MIN, ZOOM_MAX = 0.5, 2.0
 SAVE_DEBOUNCE_MS = 400
 
 
+def _session_label(s) -> str:
+    """会话在下拉里显示成什么。`s` 是 `sessions.Session`(有 .id / .title / .mtime),
+    不是 dict——沿用旧面板的口径:没标题就退回「(无标题)」,别把 uuid 甩给用户看。"""
+    return s.title if s.title else "(无标题)"
+
+
 class _Canvas(QGraphicsView):
     """只管画背景网格和缩放;业务全在 OfficeWindow。"""
 
@@ -184,11 +190,10 @@ class OfficeWindow(QMainWindow):
         """灌该成员的历史会话;默认选中最近一条(列表首项)。"""
         items = list(sessions or [])
         self._sessions[name] = items
-        self._picked[name] = items[0].get("id") if items else None
+        self._picked[name] = items[0].id if items else None
         seat = self.seats.get(name)
         if seat is not None:
-            seat.set_subtitle(items[0].get("title") or "上次会话"
-                              if items else "新会话")
+            seat.set_subtitle(_session_label(items[0]) if items else "新会话")
 
     def set_address(self, name: str, addr: str | None) -> None:
         self._addrs[name] = addr
@@ -259,13 +264,13 @@ class OfficeWindow(QMainWindow):
         new = menu.addAction("新会话")
         new.triggered.connect(lambda: self._pick(name, None, "新会话"))
         for s in items:
-            title = s.get("title") or s.get("id")
+            title = _session_label(s)
             act = menu.addAction(title)
             act.triggered.connect(
-                lambda _=False, sid=s.get("id"), t=title: self._pick(name, sid, t))
+                lambda _=False, sid=s.id, t=title: self._pick(name, sid, t))
             rm = menu.addAction(f"  删除「{title}」")
             rm.triggered.connect(
-                lambda _=False, sid=s.get("id"):
+                lambda _=False, sid=s.id:
                 self.delete_session_requested.emit(name, sid))
         menu.exec(self._canvas.mapToGlobal(
             self._canvas.mapFromScene(self.seats[name].scenePos())))

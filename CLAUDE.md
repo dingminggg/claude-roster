@@ -11,7 +11,10 @@
 C:\Users\LQ\PhpstormProjects\claude-cockpit\.venv\Scripts\pythonw.exe -m claude_cockpit.main
 # 测试(147 个)
 QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest -q
-# 离屏装配自检(把 QApplication.exec 打桩成返回 0,跑 main() 看 rc 0);
+# 离屏装配自检(把 QApplication.exec 打桩成返回 0,跑 main() 看 rc 0)。
+# ⚠ 跑之前先确认没有 cockpit 在跑:main() 开头的单实例探测发现已有实例会直接
+#   return 0,此时 rc 0 的含义是「已有实例」而不是「启动没问题」,自检等于没做
+#   (踩过:自检连报三次 rc 0,真机一起就崩)。
 # GBK 控制台打印 emoji 要加 PYTHONIOENCODING=utf-8。
 # 注意:offscreen 平台没有中文字体,拿它截图看到的全是方框——
 # 要肉眼核对画面就别设 QT_QPA_PLATFORM,用默认 windows 平台抓图。
