@@ -18,6 +18,7 @@ class Member:
     color: str = "#3b82f6"
     model: str | None = None
     permission_mode: str = "default"
+    dept: str = ""
 
 
 def validate_member(m: Member, existing_names: set[str] | None = None) -> None:
@@ -27,6 +28,8 @@ def validate_member(m: Member, existing_names: set[str] | None = None) -> None:
         raise ValueError(f"成员名已存在: {m.name}")
     if not m.cwd.is_dir():
         raise ValueError(f"成员 {m.name} 的目录不存在: {m.cwd}")
+    if len(m.dept) > 32:
+        raise ValueError(f"成员 {m.name} 的部门名过长(最多 32 字): {m.dept!r}")
 
 
 def load_config(path: str | Path = "agents.yaml") -> list[Member]:
@@ -43,6 +46,7 @@ def load_config(path: str | Path = "agents.yaml") -> list[Member]:
             color=item.get("color", "#3b82f6"),
             model=item.get("model"),
             permission_mode=item.get("permission_mode", "default"),
+            dept=str(item.get("dept") or "").strip(),
         )
         validate_member(m)
         members.append(m)
@@ -62,6 +66,8 @@ def save_config(path: str | Path, members: list[Member]) -> None:
              "color": m.color, "permission_mode": m.permission_mode}
         if m.model:
             d["model"] = m.model
+        if m.dept:
+            d["dept"] = m.dept
         items.append(d)
     body = yaml.safe_dump({"agents": items}, allow_unicode=True, sort_keys=False)
     text = "# claude-cockpit 成员清单(由面板自动写回)\n" + body

@@ -76,3 +76,25 @@ def test_duplicate_names_rejected(tmp_path):
     """)
     with pytest.raises(ValueError):
         load_config(p)
+
+
+def test_dept_roundtrip(tmp_path):
+    """部门字段能写回、能读出来。"""
+    p = tmp_path / "agents.yaml"
+    m = Member(name="fad", cwd=tmp_path, dept="后端组")
+    save_config(p, [m])
+    assert load_config(p)[0].dept == "后端组"
+
+
+def test_dept_missing_defaults_to_empty(tmp_path):
+    """老 agents.yaml 没有 dept 字段 → 空字符串,不报错。"""
+    p = tmp_path / "agents.yaml"
+    p.write_text(f"agents:\n- name: fad\n  cwd: {tmp_path}\n", encoding="utf-8")
+    assert load_config(p)[0].dept == ""
+
+
+def test_dept_too_long_rejected(tmp_path):
+    """部门名限长,防止画布上的地毯标签被一行超长文本撑坏。"""
+    from claude_cockpit.config import validate_member
+    with pytest.raises(ValueError):
+        validate_member(Member(name="fad", cwd=tmp_path, dept="部" * 33))
