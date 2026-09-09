@@ -89,6 +89,8 @@ class OfficeWindow(QMainWindow):
         self._save_timer.setInterval(SAVE_DEBOUNCE_MS)
         self._save_timer.timeout.connect(self.save_layout)
         self._blink_on = True
+        self._always_on_top = False      # 与 set_always_on_top 的「值没变就不动」对齐
+        self._framed = False             # 镜头是否已对准过办公室(只在首次装配时对)
         self.rebuild(members)
 
     # ---------- 装配 ----------
@@ -97,6 +99,12 @@ class OfficeWindow(QMainWindow):
         self.seats.clear()
         self.areas.clear()
         self._members = list(members)
+        # 成员删掉后,它的会话/地址不清掉会一直留着:同名重建时会显示上一个人的
+        # 会话地址和选中会话,直到下一个 tick 才被盖掉
+        live = {m.name for m in self._members}
+        self._sessions = {k: v for k, v in self._sessions.items() if k in live}
+        self._picked = {k: v for k, v in self._picked.items() if k in live}
+        self._addrs = {k: v for k, v in self._addrs.items() if k in live}
         raw = settings.load().get("office") or {}
         lay = layout_mod.ensure(layout_mod.parse(raw), self._members)
         self._lay = lay
@@ -118,10 +126,14 @@ class OfficeWindow(QMainWindow):
             seat.speaker_clicked.connect(self.stop_speaking_requested.emit)
             seat.moved.connect(lambda _n: self._queue_save())
             self.seats[m.name] = seat
-        self.resize(*lay.window)
         self._apply_zoom(lay.zoom)
         self.refit_scene()
-        self.focus_content()
+        # 窗口尺寸和镜头都只在第一次装配时设:rebuild 每次增删改成员都会跑,
+        # 每次都设的话,改一个成员的 emoji 就把窗口缩回存盘尺寸、视角弹回左上角
+        if not self._framed:
+            self.resize(*lay.window)
+            self.focus_content()
+            self._framed = True
 
     def refit_scene(self) -> None:
         """sceneRect 跟着内容长:否则把地毯拖到边界就走不动了,「无限画布」是假的。"""
@@ -185,8 +197,17 @@ class OfficeWindow(QMainWindow):
         """空操作:画布上的位置由用户摆放,排序无意义(保留签名给 main.py)。"""
 
     def set_always_on_top(self, on: bool) -> None:
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, bool(on))
-        self.show()
+        """切换「置顶」。改 WindowStaysOnTopHint 后 Windows 需要重新 show() 才生效,
+        重开时机会丢失当前显隐/位置,所以只在确有变化且窗口可见时才重开——
+        无条件 show() 会把托盘里隐藏着的窗口硬弹出来。"""
+        on = bool(on)
+        if on == self._always_on_top:
+            return
+        self._always_on_top = on
+        was_visible = self.isVisible()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
+        if was_visible:
+            self.show()
 
     def tick_blink(self) -> None:
         """由 main 的 550ms 定时器驱动:有新消息的工位屏幕闪。"""
@@ -276,6 +297,23 @@ class OfficeWindow(QMainWindow):
         s["office"] = layout_mod.dump(lay)
         settings.save(s)
         self.refit_scene()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._dark_titlebar()
+
+    def _dark_titlebar(self) -> None:
+        """把标题栏刷成深色(DWM)。窗口是深色的,标题栏还白着很割裂。
+        20 / 19 是新旧两版 Windows 的属性号,都试一遍;不支持就算了,全吞。"""
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            for attr in (20, 19):
+                v = ctypes.c_int(1)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
+        except Exception:
+            pass
 
     def closeEvent(self, e):
         self.save_layout()

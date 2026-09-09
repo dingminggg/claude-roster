@@ -140,3 +140,76 @@ def test_focus_content_puts_office_at_viewport_topleft(win, app):
     assert seen.top() <= content.top()
     assert seen.left() > content.left() - 200      # 不是停在几百像素外的空地
     assert seen.top() > content.top() - 200
+
+
+def test_always_on_top_does_not_force_hidden_window_open(win, app):
+    """在托盘里隐藏着的时候切「置顶」,不许把窗口硬弹出来
+    (旧面板专门为此留了守卫,别再丢一次)。"""
+    win.show()
+    app.processEvents()
+    win.hide()
+    app.processEvents()
+    win.set_always_on_top(True)
+    app.processEvents()
+    assert not win.isVisible()
+
+
+def test_always_on_top_same_value_is_a_noop(win, app):
+    """值没变就别重开窗口:重开会丢当前显隐/位置。"""
+    win.show()
+    app.processEvents()
+    win.set_always_on_top(True)
+    win.hide()
+    app.processEvents()
+    win.set_always_on_top(True)          # 同一个值,不该有任何动作
+    app.processEvents()
+    assert not win.isVisible()
+
+
+def test_rebuild_drops_data_of_gone_members(win):
+    """成员删了,它的会话地址/选中会话不许留着——同名重建会串味。"""
+    from pathlib import Path
+    from claude_cockpit.config import Member
+    win.set_address("fad", "fad-backend-f3")
+    win.set_sessions("fad", [{"id": "s1", "title": "旧会话", "mtime": 1}])
+    win.rebuild([Member(name="other", cwd=Path("."), dept="后端组")])
+    assert win.build_menu("fad") is not None          # 不该抛
+    menu = win.build_menu("other")
+    item = next(a for a in menu.actions() if "复制会话地址" in a.text())
+    assert not item.isEnabled()                       # 新成员没有地址,不该继承
+
+    win.rebuild([Member(name="fad", cwd=Path("."), dept="后端组")])
+    again = next(a for a in win.build_menu("fad").actions()
+                 if "复制会话地址" in a.text())
+    assert not again.isEnabled()                      # 同名重建也不许拿到旧地址
+
+
+def test_rebuild_keeps_camera_where_user_left_it(win, app):
+    """改成员会触发 rebuild,不能把用户拖好的视角弹回左上角。
+
+    用「同一批成员」重建 —— 这正是改个 emoji / 编辑成员的真实场景,内容大小不变,
+    排除掉「内容变少、视图被夹回可滚动范围」那种合理位移。
+    """
+    win.resize(700, 500)
+    win.show()
+    app.processEvents()
+    canvas = win.centralWidget()
+    canvas.centerOn(1200, 900)
+    app.processEvents()
+    def center():
+        return canvas.mapToScene(canvas.viewport().rect()).boundingRect().center()
+
+    before = center()
+    win.rebuild(_members())          # 同一批成员:内容大小不变
+    app.processEvents()
+    after = center()
+    assert (after - before).manhattanLength() < 20
+
+
+def test_dark_titlebar_survives_missing_dwm(win, app, monkeypatch):
+    """标题栏刷黑失败(非 Windows / 老系统)不许把开窗搞崩。"""
+    import ctypes
+    monkeypatch.setattr(ctypes, "windll", None, raising=False)
+    win.show()
+    app.processEvents()
+    assert win.isVisible()
