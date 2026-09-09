@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from claude_cockpit.panel import TrayPopup
+from claude_cockpit.tray_popup import TrayPopup
 
 
 @pytest.fixture(scope="module")

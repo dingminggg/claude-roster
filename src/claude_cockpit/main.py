@@ -17,7 +17,8 @@ from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
 from .matching import match_pending, norm_path, sessions_for_cwd
 from .office import OfficeWindow, UP_STATES
-from .panel import ICON_PATH, TrayPopup
+from .assets import ICON_PATH
+from .tray_popup import TrayPopup
 
 
 def newly_pending(prev: set[str], cur: set[str]) -> set[str]:
