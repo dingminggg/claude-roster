@@ -97,3 +97,27 @@ def test_ensure_drops_areas_and_seats_of_gone_members():
     lay = layout.ensure(lay, [_m("a", "d")])
     assert set(lay.areas) == {"d"}
     assert set(lay.seats) == {"a"}
+
+
+def test_new_area_sized_for_member_count():
+    """新地毯按人数铺成最多 3 列的网格:不这么算,13 个人会被一个个向右撑成
+    一条两千多像素的窄带,一屏看不完。"""
+    members = [_m(f"m{i}", "d") for i in range(13)]
+    lay = layout.ensure(layout.parse({}), members)
+    _x, _y, w, h = lay.areas["d"]
+    assert w <= layout.AREA_PAD[0] * 2 + 3 * layout.SEAT_W + 2 * layout.GAP
+    assert h > layout.AREA_DEFAULT[1]          # 够高:铺了 5 行
+    for name in (m.name for m in members):     # 每个人都在地毯里面
+        sx, sy = lay.seats[name]
+        assert sx + layout.SEAT_W <= w
+        assert sy + layout.SEAT_H <= h
+
+
+def test_single_member_area_keeps_minimum_width_and_fits_one_seat():
+    """一个人的部门:宽度取默认下限(别缩成一个瘦条),高度刚好容一个工位。"""
+    lay = layout.ensure(layout.parse({}), [_m("solo", "d")])
+    _x, _y, w, h = lay.areas["d"]
+    assert w == layout.AREA_DEFAULT[0]
+    sx, sy = lay.seats["solo"]
+    assert sx + layout.SEAT_W <= w
+    assert sy + layout.SEAT_H <= h

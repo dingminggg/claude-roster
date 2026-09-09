@@ -121,6 +121,7 @@ class OfficeWindow(QMainWindow):
         self.resize(*lay.window)
         self._apply_zoom(lay.zoom)
         self.refit_scene()
+        self.focus_content()
 
     def refit_scene(self) -> None:
         """sceneRect 跟着内容长:否则把地毯拖到边界就走不动了,「无限画布」是假的。"""
@@ -128,6 +129,23 @@ class OfficeWindow(QMainWindow):
         if r.isEmpty():
             r = QRectF(0, 0, 800, 600)
         self.scene.setSceneRect(r.adjusted(-600, -400, 600, 400))
+
+    def focus_content(self) -> None:
+        """把视口挪到办公室的左上角。
+
+        sceneRect 比内容大一圈(留出往外拖的余地),视口默认停在 sceneRect 中央,
+        结果一开窗看到的是半屏空地、办公室缩在角上。
+        """
+        r = self.scene.itemsBoundingRect()
+        if r.isEmpty():
+            return
+        # 用 centerOn 而不是直接设滚动条:滚动条的数值起点跟着 sceneRect 走,
+        # sceneRect 起点不为零时自己算必偏。
+        vp = self._canvas.viewport().size()
+        margin = 12
+        self._canvas.centerOn(
+            r.left() - margin + vp.width() / 2 / self.zoom,
+            r.top() - margin + vp.height() / 2 / self.zoom)
 
     # ---------- 对外接口(与 panel.Panel 同名同签名) ----------
     def set_run_state(self, name: str, state: str) -> None:

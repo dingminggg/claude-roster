@@ -14,7 +14,8 @@ SEAT_W, SEAT_H = 180, 112
 GAP = 20                        # 工位之间的间距
 AREA_PAD = (20.0, 26.0)         # 区域内第一个工位的左上留白(26 让开地毯上的部门名)
 AREA_MIN = (200.0, 120.0)       # 区域最小尺寸(与 DeptAreaItem 的拉伸下限一致)
-AREA_DEFAULT = (420.0, 150.0)   # 新部门的默认地毯尺寸:一排两个工位
+AREA_DEFAULT = (420.0, 150.0)   # 一块地毯至少这么大(一排两个工位)
+AREA_COLS = 3                   # 新地毯按几列铺:再宽一屏就装不下了
 AREA_ORIGIN = (10.0, 30.0)      # 第一块地毯的落点
 DEFAULT_WINDOW = (900, 620)
 UNASSIGNED = "未分配"           # 没填 dept 的成员归到这块地毯
@@ -88,6 +89,19 @@ def _i(x: float):
     return int(x) if float(x).is_integer() else float(x)
 
 
+def _default_area_size(n: int) -> tuple[float, float]:
+    """新地毯的尺寸:按人数铺成最多 AREA_COLS 列的网格。
+
+    不这么算就得靠 ensure 一个个向右撑宽,13 个人会变成一条两千多像素的窄带,
+    一屏根本看不完。
+    """
+    cols = max(1, min(AREA_COLS, n))
+    rows = max(1, -(-n // cols))            # 向上取整
+    w = AREA_PAD[0] * 2 + cols * SEAT_W + (cols - 1) * GAP
+    h = AREA_PAD[1] + rows * SEAT_H + (rows - 1) * GAP + AREA_PAD[1]
+    return (max(AREA_DEFAULT[0], w), max(AREA_DEFAULT[1], h))
+
+
 def _slots(w: float, h: float):
     """区域里能放下的工位位置,按行优先。"""
     y = AREA_PAD[1]
@@ -118,7 +132,8 @@ def ensure(lay: Layout, members) -> Layout:
             continue
         bottom = max((y + h for _x, y, _w, h in areas.values()), default=None)
         y = AREA_ORIGIN[1] if bottom is None else bottom + GAP
-        areas[d] = (AREA_ORIGIN[0], y, AREA_DEFAULT[0], AREA_DEFAULT[1])
+        aw, ah = _default_area_size(len(by_dept[d]))
+        areas[d] = (AREA_ORIGIN[0], y, aw, ah)
 
     seats = {}
     for d in depts:

@@ -123,3 +123,20 @@ def test_scene_rect_grows_with_content(win):
     win.areas["后端组"].setPos(3000, 2000)
     win.refit_scene()
     assert win.scene.sceneRect().width() > before.width()
+
+
+def test_focus_content_puts_office_at_viewport_topleft(win, app):
+    """开窗别停在 sceneRect 中央那片空地上:办公室要在左上角。"""
+    win.resize(700, 500)
+    win.show()
+    app.processEvents()
+    win.refit_scene()
+    win.focus_content()
+    app.processEvents()
+    canvas = win.centralWidget()
+    seen = canvas.mapToScene(canvas.viewport().rect()).boundingRect()
+    content = win.scene.itemsBoundingRect()
+    assert seen.left() <= content.left()
+    assert seen.top() <= content.top()
+    assert seen.left() > content.left() - 200      # 不是停在几百像素外的空地
+    assert seen.top() > content.top() - 200
