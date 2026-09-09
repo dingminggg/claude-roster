@@ -1,5 +1,5 @@
 """一个工位 = 一个成员的控制台。俯视画法:L 形隔断 + 大桌板(显示器背面 /
-键盘 / 鼠标 / 贴桌工牌)+ 办公椅(靠背用成员配色)+ 员工 emoji + 绿植。
+键盘 / 鼠标 / 刻在桌面的成员名)+ 办公椅(靠背用成员配色)+ 员工 emoji + 绿植。
 
 屏幕光的颜色 = 运行状态(忙=蓝 / 闲=绿 / 启动中=琥珀);屏幕**闪** = 有新消息
 (答完一轮 / 等你确认)。未运行不闪——没窗口就没有「在等你」这回事。
@@ -18,10 +18,9 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from .theme import (
-    BADGE, BADGE_EDGE, BADGE_OFF, BADGE_TXT, CHAIR, CHAIR_SEAT, DESK,
-    DESK_EDGE, DESK_EDGE_OFF, DESK_OFF, DIM, FLOOR, FLOOR_HOVER, GEAR, HEAD, KEYS, MOUSE,
-    NO_BG, NO_FG, OFF_OPACITY, OFF_TINT, PART, PART_TOP, PLANT, PLANT_OFF,
-    PLANT_POT, TXT, YES_BG, YES_FG, mix,
+    CHAIR, CHAIR_SEAT, DESK, DESK_EDGE, DESK_EDGE_OFF, DESK_OFF, DIM, FLOOR,
+    FLOOR_HOVER, GEAR, HEAD, KEYS, MOUSE, NO_BG, NO_FG, OFF_OPACITY, OFF_TINT,
+    PART, PART_TOP, PLANT, PLANT_OFF, PLANT_POT, TXT, YES_BG, YES_FG, mix,
 )
 
 SEAT_W, SEAT_H = 180, 112
@@ -36,8 +35,8 @@ def _font(size: int, bold: bool = False) -> QFont:
 
 # 字号从不随状态变:提到模块级建一次。paint 每帧重建 QFont 要走字体匹配查找,
 # 而 paint 是「每个工位 × 每次 tick/闪烁/悬停」都跑的。
-FONT_NAME = _font(8, bold=True)     # 工牌上的成员名
-FONT_SPEAKER = _font(9)             # 朗读小喇叭
+FONT_NAME = _font(8, bold=True)     # 刻在桌面上的成员名
+FONT_SPEAKER = _font(9)             # 朗读小喇叭(名字右边)
 FONT_EMOJI = _font(11)              # 椅子上的员工
 FONT_PILL = _font(8, bold=True)     # 状态胶囊 / 启动键
 FONT_SUB = _font(8)                 # 会话行 / 控制台标题
@@ -241,20 +240,15 @@ class SeatItem(QGraphicsObject):
         p.setBrush(QBrush(MOUSE))
         p.drawEllipse(QRectF(66, 43, 6, 8))
 
-        # 工牌:贴在桌面右侧,浅色卡 + 左侧成员配色条
-        p.setPen(QPen(BADGE_EDGE, 1))
-        p.setBrush(QBrush(BADGE if up else BADGE_OFF))
-        p.drawRoundedRect(QRectF(94, 20, 66, 20), 3, 3)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(self.color if up else OFF_TINT))
-        p.drawRoundedRect(QRectF(96, 22, 3, 16), 1.5, 1.5)
+        # 成员名:直接刻在桌面右半边(不再套一张白工牌——身份已经由椅子靠背的
+        # 成员配色带着了,再加一张浅色卡只是在浅底上多堆一层)
         p.setFont(FONT_NAME)
-        p.setPen(QPen(BADGE_TXT))
-        p.drawText(QRectF(102, 20, 56, 20),
+        p.setPen(QPen(TXT if up else DIM))
+        p.drawText(QRectF(94, 20, 68, 20),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                   _elide(self.name, 10))
+                   _elide(self.name, 11))
 
-        # 朗读中:工牌右侧一个小喇叭,点它停播
+        # 朗读中:名字右侧一个小喇叭,点它停播
         if up and self._speaking:
             p.setFont(FONT_SPEAKER)
             p.setPen(QPen(TXT))

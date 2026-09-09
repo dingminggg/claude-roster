@@ -4,7 +4,7 @@
 所有前景色按「在浅底上要看得清」挑,不是把深色主题反一下就完事。
 
 层次是刻意排的,从底到顶一层比一层亮:
-    画布 CANVAS → 地毯 CARPET → 工位地面 FLOOR → 桌板 DESK → 工牌/纸面
+    画布 CANVAS → 地毯 CARPET → 工位地面 FLOOR → 桌板 DESK
 这样即使不画边框,东西也能靠明度分开。
 """
 from __future__ import annotations
@@ -39,12 +39,6 @@ HEAD = QColor("#ffffff")        # 头顶底盘:白的,emoji 压在上面最清�
 PLANT_POT = QColor("#b99a76")
 PLANT = QColor("#5aa36e")
 PLANT_OFF = QColor("#b7c2b8")
-
-# ---------- 工牌 ----------
-BADGE = QColor("#ffffff")
-BADGE_OFF = QColor("#eef0f3")
-BADGE_EDGE = QColor("#d3d8e0")  # 白工牌压在浅工位上,得有一条边才立得住
-BADGE_TXT = QColor("#1f2328")
 
 # ---------- 文字 ----------
 TXT = QColor("#1f2328")         # 主文字
