@@ -1,6 +1,6 @@
 # claude-cockpit
 
-轻量原生面板(PySide6),用来**管理一批真实的 `claude` CLI 控制台窗口**:谁答完一轮/等你确认就提醒,点一下把那个黑框最大化到眼前。和 desk-buddy(小青蛙)配套,共用其 Claude Code hook 信号基建。
+轻量原生面板(PySide6),用来**管理一批真实的 `claude` CLI 控制台窗口**:界面是一张**办公室平面图**——每个成员一个俯视工位、按部门分区落在地毯上,谁答完一轮/等你确认就屏幕闪着提醒,点一下把那个黑框最大化到眼前。和 desk-buddy(小青蛙)配套(信号通道现已自给自足,见硬约束 4)。
 
 **不是**自绘聊天界面——每个成员就是一个真实独立的 `claude` 控制台(`CREATE_NEW_CONSOLE`)。
 
@@ -9,28 +9,36 @@
 ```bash
 # 启动(无窗后台)
 C:\Users\LQ\PhpstormProjects\claude-cockpit\.venv\Scripts\pythonw.exe -m claude_cockpit.main
-# 测试(96 个)
+# 测试(147 个)
 QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest -q
-# 离屏渲染面板截图自检;GBK 控制台打印 emoji 要加 PYTHONIOENCODING=utf-8
+# 离屏装配自检(把 QApplication.exec 打桩成返回 0,跑 main() 看 rc 0);
+# GBK 控制台打印 emoji 要加 PYTHONIOENCODING=utf-8。
+# 注意:offscreen 平台没有中文字体,拿它截图看到的全是方框——
+# 要肉眼核对画面就别设 QT_QPA_PLATFORM,用默认 windows 平台抓图。
 ```
 
 desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来联动启动(开机自启 + 小青蛙右键「启动驾驶舱」)。
 
 ## 源码地图(src/claude_cockpit/)
 
-- **config.py** — `Member` 数据类 + `load_config/save_config/validate_member`;成员清单在 `agents.yaml`(面板增删改会写回)。
-- **launcher.py** — `window_title(m)="CCKPT:<name>"`;`launch(m)` 用 `CREATE_NEW_CONSOLE` + `cmd /k title CCKPT:x & cd /d ... & ping -n 4 ... & claude <flags>`(ping 拖 ~3s,给抓句柄留窗口;`--resume` 由面板下拉选会话后经 session_id 传入,不自动)。
+- **config.py** — `Member` 数据类 + `load_config/save_config/validate_member`;成员清单在 `agents.yaml`(面板增删改会写回)。`dept` 是可选的部门(画布上的地毯分区,留空 → 「未分配」),老 yaml 缺字段读成空。
+- **launcher.py** — `window_title(m)="CCKPT:<name>"`;`launch(m)` 用 `CREATE_NEW_CONSOLE` + `cmd /k title CCKPT:x & cd /d ... & ping -n 4 ... & claude <flags>`(ping 拖 ~3s,给抓句柄留窗口;`--resume` 由面板下拉选会话后经 session_id 传入,不自动)。`launch` 传 `env=child_env()` 剔除 `CLAUDE_CODE_CHILD_SESSION`——cockpit 若从 Claude 会话里启动会继承该标记,透传给成员窗口会让 claude 把自己当嵌套子会话、不保存 transcript(无法 resume)。
 - **sessions.py** — 扫 `~/.claude/projects/<编码cwd>/*.jsonl` 列成员历史会话(id/标题/最后活跃)、删除会话;标题取最后一条 `ai-title`,回退首条用户消息。
 - **winman.py** — Win32(ctypes):`find_by_title / is_window / wait_for_title / is_console_window / bring_to_front / maximize / minimize`。
 - **store.py** — `~/.claude/data/claude-cockpit/handles.json`,缓存 `name -> hwnd`,重启 cockpit 复用还活着的窗口。
-- **settings.py** — `~/.claude/data/claude-cockpit/settings.json`,面板小设置(目前仅 `sound_enabled`,默认开);与 store 分开各管各的。
+- **settings.py** — `~/.claude/data/claude-cockpit/settings.json`,面板小设置(`sound_enabled` 默认开、`always_on_top`)+ `office` 段(画布布局:地毯位置尺寸 / 工位偏移 / 窗口尺寸 / 缩放,由 `layout.py` 读写);与 store 分开各管各的。
 - **sound.py** — `play()` 播自带 `assets/guagua.mp3`(从小青蛙搬来,本项目自带不依赖它),用 `QMediaPlayer`,失败回退 `winsound` 蜂鸣,异常全吞。
 - **cc_signals.py** — 文件信号,**两条独立通道**(见下)。
 - **matching.py** — `match_pending(records, members)` 按规范化 cwd 把信号对到成员;`norm_path`。
 - **peers.py** — 读 `~/.claude/sessions/<pid>.json` 探「同机 Claude 会话」:`read_peers()` 拿 cwd/会话名/忙闲,`match_peers()` 按规范化 cwd 对到成员(复用 `matching.norm_path`,与 `match_pending` 同口径)。判活 = `pid_alive()` + `updatedAt` 30min 时效兜底(pid 会被系统复用,光看 pid 会把陈旧残留当活会话);同一 cwd 多会话取 `updated_at` 最大的那个。**那批 json 是 Claude Code 的内部文件、不是公开契约**,所以本模块只读不写、异常全吞:探不到就返回空,面板退回兜底的「运行中」,不影响任何既有功能。
-- **panel.py** — 深色面板 UI:成员卡、运行键胶囊(四态+兜底)、内联确认、闪动信封、固定宽 310;导出 `UP_STATES`(起来了的那几个状态,明暗/手型/信封统一按它判断,别再散着写 `== "running"`)。右键菜单由 `_Card.build_menu()` 单独搭出来(不在 `contextMenuEvent` 里现搭——`exec` 阻塞,不抽出来没法单测)。
+- **layout.py** — 办公室画布的布局账本(纯逻辑,不 import Qt):`parse/dump` 读写 settings.json 的 `office` 段、`ensure` 补齐缺省、`dept_of` 归属兜底(空部门 → `UNASSIGNED="未分配"`)。**地毯坐标是绝对值 `[x,y,w,h]`,工位坐标是「相对所属地毯」的偏移 `[x,y]`**(工位是地毯的 Qt 子项,整块挪动时不用重算)。新地毯按人数铺成最多 3 列的网格(不然 13 个成员会被一个个向右撑成一条两千多像素的窄带)。坏数据一律丢弃回默认、绝不抛(与 `peers.py` 同口径:布局是便利功能,不能因为它打不开面板)。
+- **office/seat_item.py** — `SeatItem`:一个工位的俯视自绘(L 形隔断 / 大桌板 / 显示器背面 / 键盘鼠标 / 贴桌工牌 / 办公椅(靠背=成员配色)/ 员工 emoji / 绿植 / 状态胶囊 / 会话行 / 启动键与内联确认)。**屏幕光的颜色 = 运行状态,屏幕闪 = 有新消息**。导出 `UP_STATES`(起来了的那几个状态,明暗/手型/闪烁统一按它判断,别再散着写 `== "running"`)。命中区由 `r_go/r_yes/r_no/r_picker/r_speaker` **一处**给出,`paint` 和鼠标事件共用同一份坐标(两处各写一遍必然漂移)。字体是模块级常量:`paint` 是「每个工位 × 每次 tick/闪烁/悬停」都跑的,每帧新建 `QFont` 要走字体匹配查找。`moved` 只在**真拖动过**才发(否则点一下按钮就写一次盘)。
+- **office/dept_area.py** — `DeptAreaItem`:部门地毯(圆角矩形 + 虚线边 + 部门名 + 右下角拉伸角)。整块可拖,工位作为子项跟着走;抓拉伸角时只改尺寸不挪位置,最小 200×120。
+- **office/view.py** — `OfficeWindow`:场景装配、按部门落座、Ctrl+滚轮缩放、右键菜单、会话下拉、布局存盘(400ms 防抖 + `closeEvent` 兜底)、`refit_scene`(sceneRect 跟着内容长,否则「无限画布」是假的)、`focus_content`(**只在首次装配**时把镜头对准办公室左上角——`rebuild` 每次增删改成员都会跑,每次都对准会把用户拖好的视角弹回去;窗口尺寸同理)。**方法名和信号名与退休的 `panel.Panel` 完全一致**,所以 `main.py` 只需换构造类;`set_order` 是空操作(位置由用户摆,排序无意义)。右键菜单由 `build_menu()` 单独搭出来(不在 `contextMenuEvent` 里现搭——`exec` 阻塞,不抽出来没法单测)。`set_always_on_top` 有守卫:值没变就 return、只有本来可见才 `show()`(无条件 show 会把托盘里隐藏着的窗口硬弹出来)。
+- **tray_popup.py** — `TrayPopup`:托盘悬停时弹出的无边框小浮层,列出有消息的成员。原住在 `panel.py`,卡片列表退休时搬出来单过。
+- **assets.py** — 自带资源路径(`ICON_PATH`)。图标既给托盘也给窗口用,不该继续挂在某个具体界面模块下面。
 - **hooks/** — `turn_ended.py`(Stop 写)、`clear.py`(UserPromptSubmit 清)。
-- **main.py** — 装配:配置/面板/轮询(1s tick + 200ms 启动轮询 + 550ms 托盘闪)/窗口管理/托盘/单实例。
+- **main.py** — 装配:配置/面板(`OfficeWindow`)/轮询(1s tick + 200ms 启动轮询 + 550ms 托盘闪 & 工位屏幕闪)/窗口管理/托盘/单实例。
 
 ## 信号双通道(关键设计,别搞混)
 
@@ -41,7 +49,7 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 | 权限确认 | `~/.claude/data/claude-cockpit/pending/` | Notification hook(消息含 "permission") | Stop / UserPromptSubmit | **只有驾驶舱** |
 | 答完一轮 | `~/.claude/data/claude-cockpit/turn-ended/` | Stop hook | UserPromptSubmit / 点卡已读 / 超时 prune | **只有驾驶舱** |
 
-> 两通道语义不同:pending=在等你确认权限(Notification 写),turn-ended=答完该你看了(Stop 写)。分开放是因为生命周期/清除时机不同。两者驾驶舱都当「有消息」(信封+托盘闪+提示音)。
+> 两通道语义不同:pending=在等你确认权限(Notification 写),turn-ended=答完该你看了(Stop 写)。分开放是因为生命周期/清除时机不同。两者驾驶舱都当「有消息」(工位屏幕闪 + 托盘闪 + 提示音)。
 
 `~/.claude/settings.json` 里已挂(全部用 cockpit venv 的 python,**不再引用 desk_buddy**):
 - **Stop** → `claude_cockpit.hooks.turn_ended`(写答完 + 顺手清 pending)
@@ -51,13 +59,15 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 ## 当前交互行为
 
 - **启动**:点「启动」→ 原地换成「确定/取消」内联确认(不弹窗)→ 确定才拉起。启动是非阻塞的:立刻显示「启动中」,200ms 快轮询**趁 claude 改标题前**抓 HWND 落盘,再转「运行中」。
-- **运行键四态**同宽胶囊(56×22,只换文字配色,右侧始终对齐一列):`启动`(未运行,灰)/ `启动中`(琥珀,还没起来)/ `忙碌中`(蓝,起来了正在干活)/ `空闲`(绿,可以找它了)。忙/闲来自 `peers` 探到的会话状态;**窗口活着但探不到状态时兜底显示 `运行中`(绿),绝不退化成「未运行」**(否则会重复开空白窗口,见硬约束 3)。未运行的卡整张置灰、排后;起来了的点亮、排前——`main._RANK` 里忙和闲**同档**,忙闲切换不会让卡片上下乱跳。
-- **右键成员卡**:`复制会话地址`(把该成员的会话名塞进剪贴板,就是会话间发消息用的地址;成员名 ≠ 会话名,成员叫 `fad-2`、会话叫 `fad-backend-2-f3`,不给出来对不上)/ 打开目录 / 编辑 / 删除。探不到地址时该项**置灰而不是隐藏**(隐藏用户会以为功能没了),tooltip 说明原因。
-- **有新消息**(答完一轮/等权限):名字后面一个**白色小信封 ✉ 闪烁**(550ms)+ **托盘图标闪** + **响一声提示音**(成员「新进入」pending 时响一声,首个 tick 静默播种避免开机狂叫;托盘菜单「提示音」可关,存 settings.json)。
-- **点成员横条**(仅运行中):把它的控制台 **maximize 最大化**弹到眼前 + 标记已读(✉ 消失)+ 停闪。**注意不要用 bring_to_front**——它带 `SW_RESTORE` 会把最大化还原。未运行点横条无反应(只有「启动」键能开)。
-- **托盘闪烁** = `cur_pending - acked` 非空才闪;点托盘图标或点任一卡 → ack 停闪(列表里各自的 ✉ 仍在,逐个点掉);新成员答完会重新闪。
-- **未运行成员**名字下方有个**会话下拉**:默认选中最近一次会话,可点开换/新建/删除(删除二次点确认)。点「启动」→「确定」后按选中项 `claude --resume <id>`(选「新会话」则不带)。运行中该位置换回控制台实时标题。
-- 面板**固定宽 310、无最大化按钮**;单实例(QLocalServer,再启动只把已有面板弹前台);托盘可显隐/退出;深色标题栏(DWM)。
+- **主视图是一张办公室平面图**(不再是竖排卡片列表):可滚动、Ctrl+滚轮缩放的画布,上面是**部门地毯**(按 `Member.dept` 分,没填的进「未分配」),地毯上摆着**工位**。工位 180×112,俯视画法:L 形隔断 + 大桌板(显示器背面 / 键盘 / 鼠标 / 贴桌工牌)+ 办公椅(靠背用成员配色)+ 员工 emoji + 绿植。
+- **状态看屏幕光**:显示器的光按状态上色并洒在桌面上——`启动中`(琥珀,还没起来)/ `忙碌中`(蓝,起来了正在干活)/ `空闲`(绿,可以找它了)/ 未运行(灭,整张工位置灰)。忙/闲来自 `peers` 探到的会话状态;**窗口活着但探不到状态时兜底显示 `运行中`(绿),绝不退化成「未运行」**(否则会重复开空白窗口,见硬约束 3)。右下角还有一枚同样四态的文字胶囊(56×20)。
+- **有新消息**(答完一轮/等权限):**屏幕闪**(550ms 半拍冲亮,颜色仍是状态色,所以「谁在忙」和「谁在叫你」不打架)+ **托盘图标闪** + **响一声提示音**(成员「新进入」pending 时响一声,首个 tick 静默播种避免开机狂叫;托盘菜单「提示音」可关,存 settings.json)。**未运行的工位一律不闪**——没窗口就没有「在等你」这回事。
+- **点工位**(仅运行中):把它的控制台 **maximize 最大化**弹到眼前 + 标记已读 + 停闪。**注意不要用 bring_to_front**——它带 `SW_RESTORE` 会把最大化还原。未运行点工位无反应(只有「启动」键能开)。
+- **托盘闪烁** = `cur_pending - acked` 非空才闪;点托盘图标或点任一工位 → ack 停闪(其余工位的屏幕仍在闪,逐个点掉);新成员答完会重新闪。
+- **未运行的工位**桌上是**会话下拉行 + 启动键**:下拉默认选中最近一次会话,可换/新建/删除(删除二次点确认);点「启动」→ 原地换成 ✓/✕ → ✓ 之后按选中项 `claude --resume <id>`(选「新会话」则不带)。运行中该位置换成控制台实时标题。
+- **右键工位**:`复制会话地址`(把该成员的会话名塞进剪贴板,就是会话间发消息用的地址;成员名 ≠ 会话名,成员叫 `fad-2`、会话叫 `fad-backend-2-f3`,不给出来对不上)/ 打开目录 / 编辑 / 删除。探不到地址时该项**置灰而不是隐藏**(隐藏用户会以为功能没了),tooltip 说明原因。**右键画布空白处** = 新增成员。
+- **布局是用户自己摆的**:工位在地毯上自由拖动(不吸附),地毯整块可拖(名下工位跟着走)、右下角可拉伸(最小 200×120)。位置/尺寸/缩放存 `settings.json` 的 `office` 段,400ms 防抖落盘、关窗兜底存一次。**部门归属只认 `agents.yaml` 的 `dept`**——把工位拖到别的地毯上不会改部门,要换部门得改配置(右键「编辑」里有「部门」一栏)。
+- 面板窗口**可自由缩放**(不再是固定宽 310);单实例(QLocalServer,再启动只把已有面板弹前台);托盘可显隐/退出;深色标题栏(DWM)。
 
 ## 硬约束(踩坑换来的,务必遵守)
 
