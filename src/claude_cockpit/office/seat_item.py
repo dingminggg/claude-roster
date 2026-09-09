@@ -1,0 +1,338 @@
+"""一个工位 = 一个成员的控制台。俯视画法:L 形隔断 + 大桌板(显示器背面 /
+键盘 / 鼠标 / 贴桌工牌)+ 办公椅(靠背用成员配色)+ 员工 emoji + 绿植。
+
+屏幕光的颜色 = 运行状态(忙=蓝 / 闲=绿 / 启动中=琥珀);屏幕**闪** = 有新消息
+(答完一轮 / 等你确认)。未运行不闪——没窗口就没有「在等你」这回事。
+
+本图元只画和报事件:状态由 set_* 喂进来,不认识 peers / winman / launcher。
+命中区由 r_* 一处给出,paint 和 mousePressEvent 共用同一份坐标,避免两处漂移。
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import (
+    QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen,
+)
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
+
+SEAT_W, SEAT_H = 180, 112
+
+FLOOR = QColor("#1f2229")
+FLOOR_HOVER = QColor("#242832")
+PART = QColor("#343a46")
+PART_TOP = QColor("#434a59")
+DESK = QColor("#4a3d2e")
+DESK_EDGE = QColor("#5c4c39")
+GEAR = QColor("#1b1e24")
+CHAIR = QColor("#2f343f")
+TXT = QColor("#eaecef")
+DIM = QColor("#6e7682")
+
+# 「起来了」的状态:明暗、手型、屏幕闪统一按它判断,别散着写 == "running"
+UP_STATES = ("running", "busy", "idle")
+
+
+@dataclass(frozen=True)
+class _Style:
+    label: str
+    pill_bg: str
+    pill_fg: str
+    glow: str
+
+
+STATE_STYLE = {
+    "down":      _Style("启动",   "#2f343f", "#c7ccd6", "#3a3f4b"),
+    "launching": _Style("启动中", "#8a6a1f", "#f7e9c8", "#d9a83c"),
+    "busy":      _Style("忙碌中", "#2b5f9e", "#dce9f7", "#5b9bd8"),
+    "idle":      _Style("空闲",   "#2e7d46", "#dff5e6", "#3fb27f"),
+    "running":   _Style("运行中", "#2e7d46", "#dff5e6", "#3fb27f"),
+}
+
+
+def _elide(s: str, n: int) -> str:
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+class SeatItem(QGraphicsObject):
+    """一个工位。QGraphicsObject(而非 QGraphicsItem)是为了能发信号。"""
+
+    clicked = Signal(str)               # 点桌面:置前该成员的控制台
+    start_clicked = Signal(str)         # 点「启动」:展开内联确认
+    confirmed = Signal(str)             # 点 ✓:真的拉起
+    picker_clicked = Signal(str)        # 点会话行:弹会话下拉
+    speaker_clicked = Signal(str)       # 点 🔊:停止朗读
+    moved = Signal(str)                 # 拖完:该存盘了
+
+    def __init__(self, member):
+        super().__init__()
+        self.name = member.name
+        self.emoji = member.emoji
+        self.color = QColor(member.color)
+        self._state = "down"
+        self._msg = False
+        self._blink = True
+        self._confirm = False
+        self._speaking = False
+        self._title = ""
+        self._sub = "新会话"
+        self._hover = False
+        self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+                      | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setAcceptHoverEvents(True)
+
+    # ---------- 状态入口(由 OfficeWindow 转发 main 的 tick) ----------
+    def set_run_state(self, state: str) -> None:
+        self._state = state if state in STATE_STYLE else "running"
+        self.setCursor(Qt.CursorShape.PointingHandCursor if self.is_up()
+                       else Qt.CursorShape.ArrowCursor)
+        self._confirm = self._confirm and not self.is_up()
+        self.update()
+
+    def set_message(self, on: bool) -> None:
+        self._msg = bool(on)
+        self.update()
+
+    def set_blink(self, on: bool) -> None:
+        self._blink = bool(on)
+        if self.is_flashing() or self._msg:
+            self.update()
+
+    def set_confirm(self, on: bool) -> None:
+        self._confirm = bool(on)
+        self.update()
+
+    def set_speaking(self, on: bool) -> None:
+        self._speaking = bool(on)
+        self.update()
+
+    def set_title(self, text: str) -> None:
+        self._title = text or ""
+        self.update()
+
+    def set_subtitle(self, text: str) -> None:
+        """未运行时显示的「上次会话 / 新会话」。"""
+        self._sub = text or "新会话"
+        self.update()
+
+    # ---------- 查询(测试与绘制共用) ----------
+    def is_up(self) -> bool:
+        return self._state in UP_STATES
+
+    def status_text(self) -> str:
+        return STATE_STYLE[self._state].label
+
+    def is_flashing(self) -> bool:
+        return self.is_up() and self._msg and self._blink
+
+    # ---------- 命中区 ----------
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, SEAT_W, SEAT_H)
+
+    def r_go(self) -> QRectF:
+        return QRectF(96, 84, 56, 22)
+
+    def r_yes(self) -> QRectF:
+        return QRectF(96, 84, 27, 22)
+
+    def r_no(self) -> QRectF:
+        return QRectF(125, 84, 27, 22)
+
+    def r_picker(self) -> QRectF:
+        return QRectF(94, 64, 80, 18)
+
+    def r_speaker(self) -> QRectF:
+        return QRectF(162, 20, 16, 20)
+
+    def hit(self, pos: QPointF) -> str:
+        """局部坐标 → "go"/"yes"/"no"/"picker"/"speaker"/"seat"。"""
+        if self.is_up():
+            if self._speaking and self.r_speaker().contains(pos):
+                return "speaker"
+            return "seat"
+        if self._confirm:
+            if self.r_yes().contains(pos):
+                return "yes"
+            if self.r_no().contains(pos):
+                return "no"
+        elif self.r_go().contains(pos):
+            return "go"
+        if self.r_picker().contains(pos):
+            return "picker"
+        return "seat"
+
+    # ---------- 绘制 ----------
+    def paint(self, p: QPainter, opt, widget) -> None:
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        up = self.is_up()
+        st = STATE_STYLE[self._state]
+        p.setOpacity(1.0 if up else 0.55)
+        flash = self.is_flashing()
+        glow = QColor(st.glow)
+        if flash:
+            glow = glow.lighter(190)
+
+        # 工位地面(部门地毯在底下透出来)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(FLOOR_HOVER if self._hover else FLOOR))
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, SEAT_W, SEAT_H), 8, 8)
+        p.drawPath(path)
+
+        # L 形隔断:上 / 左两面板,顶面亮一档制造厚度
+        p.setBrush(QBrush(PART))
+        p.drawRect(QRectF(0, 0, SEAT_W, 10))
+        p.drawRect(QRectF(0, 0, 8, SEAT_H))
+        p.setBrush(QBrush(PART_TOP))
+        p.drawRect(QRectF(0, 0, SEAT_W, 3))
+        p.drawRect(QRectF(0, 0, 3, SEAT_H))
+
+        # 大桌板:横跨上半,底边加亮做厚度
+        p.setBrush(QBrush(DESK))
+        p.drawRoundedRect(QRectF(12, 14, 156, 46), 3, 3)
+        p.setBrush(QBrush(DESK_EDGE))
+        p.drawRect(QRectF(12, 58, 156, 2))
+
+        # 屏幕光:从显示器往下(朝员工)洒在桌面上
+        if up:
+            g = QLinearGradient(0, 26, 0, 58)
+            c0 = QColor(glow); c0.setAlpha(200 if flash else 120)
+            c1 = QColor(glow); c1.setAlpha(0)
+            g.setColorAt(0.0, c0)
+            g.setColorAt(1.0, c1)
+            p.setBrush(QBrush(g))
+            spill = QPainterPath()
+            spill.moveTo(30, 28)
+            spill.lineTo(62, 28)
+            spill.lineTo(74, 58)
+            spill.lineTo(18, 58)
+            spill.closeSubpath()
+            p.drawPath(spill)
+
+        # 显示器:俯视是背壳 + 支架,屏幕下沿漏一条光
+        p.setBrush(QBrush(GEAR))
+        p.drawRoundedRect(QRectF(30, 18, 32, 12), 2, 2)
+        p.setBrush(QBrush(glow))
+        p.drawRect(QRectF(32, 29, 28, 3 if flash else 2))
+        p.setBrush(QBrush(GEAR))
+        p.drawRect(QRectF(44, 30, 4, 4))
+
+        # 键盘 + 鼠标:落在桌面上
+        p.setBrush(QBrush(QColor("#262a33")))
+        p.drawRoundedRect(QRectF(28, 42, 34, 10), 2, 2)
+        p.setBrush(QBrush(QColor("#2e333d")))
+        p.drawEllipse(QRectF(66, 43, 6, 8))
+
+        # 工牌:贴在桌面右侧,浅色卡 + 左侧成员配色条
+        p.setBrush(QBrush(QColor("#dfe4ec") if up else QColor("#9aa1ac")))
+        p.drawRoundedRect(QRectF(94, 20, 66, 20), 3, 3)
+        p.setBrush(QBrush(self.color if up else DIM))
+        p.drawRoundedRect(QRectF(96, 22, 3, 16), 1.5, 1.5)
+        f = QFont(); f.setPointSize(8); f.setBold(True); p.setFont(f)
+        p.setPen(QPen(QColor("#1b1e24")))
+        p.drawText(QRectF(102, 20, 56, 20),
+                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                   _elide(self.name, 10))
+
+        # 朗读中:工牌右侧一个小喇叭,点它停播
+        if up and self._speaking:
+            f2 = QFont(); f2.setPointSize(9); p.setFont(f2)
+            p.setPen(QPen(TXT))
+            p.drawText(self.r_speaker(), Qt.AlignmentFlag.AlignCenter, "🔊")
+
+        # 办公椅(俯视):靠背朝下,靠背用成员配色
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(CHAIR))
+        p.drawRoundedRect(QRectF(24, 70, 5, 16), 2, 2)
+        p.drawRoundedRect(QRectF(53, 70, 5, 16), 2, 2)
+        p.setBrush(QBrush(QColor("#383e4a") if up else QColor("#2a2e37")))
+        p.drawRoundedRect(QRectF(28, 66, 26, 26), 7, 7)
+        p.setBrush(QBrush(self.color if up else DIM))
+        p.drawRoundedRect(QRectF(25, 90, 32, 9), 4, 4)
+        p.setBrush(QBrush(QColor("#2b2f3a")))
+        p.drawEllipse(QRectF(32, 68, 22, 22))
+        f3 = QFont(); f3.setPointSize(11); p.setFont(f3)
+        p.setPen(QPen(TXT))
+        p.drawText(QRectF(32, 68, 22, 22), Qt.AlignmentFlag.AlignCenter, self.emoji)
+
+        # 绿植:右下角
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor("#3c3a2e")))
+        p.drawRoundedRect(QRectF(160, 94, 12, 10), 2, 2)
+        p.setBrush(QBrush(QColor("#3e7d52") if up else QColor("#3a4a3e")))
+        p.drawEllipse(QRectF(158, 84, 16, 14))
+
+        # 右下:状态胶囊 / 会话行 / 启动键
+        f4 = QFont(); f4.setPointSize(8); f4.setBold(True)
+        f5 = QFont(); f5.setPointSize(8)
+        if up:
+            p.setFont(f4)
+            p.setBrush(QBrush(QColor(st.pill_bg)))
+            p.drawRoundedRect(QRectF(96, 64, 56, 20), 10, 10)
+            p.setPen(QPen(QColor(st.pill_fg)))
+            p.drawText(QRectF(96, 64, 56, 20),
+                       Qt.AlignmentFlag.AlignCenter, st.label)
+            p.setFont(f5)
+            p.setPen(QPen(DIM))
+            p.drawText(QRectF(94, 86, 62, 18),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       _elide(self._title, 9))
+        else:
+            p.setFont(f5)
+            p.setPen(QPen(DIM))
+            p.drawText(self.r_picker(),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       "▾ " + _elide(self._sub, 12))
+            p.setFont(f4)
+            p.setPen(Qt.PenStyle.NoPen)
+            if self._confirm:
+                p.setBrush(QBrush(QColor("#2e7d46")))
+                p.drawRoundedRect(self.r_yes(), 10, 10)
+                p.setBrush(QBrush(QColor("#3a3f4b")))
+                p.drawRoundedRect(self.r_no(), 10, 10)
+                p.setPen(QPen(QColor("#dff5e6")))
+                p.drawText(self.r_yes(), Qt.AlignmentFlag.AlignCenter, "✓")
+                p.setPen(QPen(QColor("#cdd2db")))
+                p.drawText(self.r_no(), Qt.AlignmentFlag.AlignCenter, "✕")
+            else:
+                p.setBrush(QBrush(QColor(st.pill_bg)))
+                p.drawRoundedRect(self.r_go(), 10, 10)
+                p.setPen(QPen(QColor(st.pill_fg)))
+                p.drawText(self.r_go(), Qt.AlignmentFlag.AlignCenter, st.label)
+
+    # ---------- 交互 ----------
+    def hoverEnterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def hoverLeaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        where = self.hit(e.pos())
+        if where == "go":
+            self.set_confirm(True)
+            self.start_clicked.emit(self.name)
+            e.accept(); return
+        if where == "yes":
+            self.set_confirm(False)
+            self.confirmed.emit(self.name)
+            e.accept(); return
+        if where == "no":
+            self.set_confirm(False)
+            e.accept(); return
+        if where == "picker":
+            self.picker_clicked.emit(self.name)
+            e.accept(); return
+        if where == "speaker":
+            self.speaker_clicked.emit(self.name)
+            e.accept(); return
+        if self.is_up():
+            self.clicked.emit(self.name)
+        super().mousePressEvent(e)      # 桌面空白 = 拖动
+
+    def mouseReleaseEvent(self, e):
+        super().mouseReleaseEvent(e)
+        self.moved.emit(self.name)      # 拖完了(没动也发,无害)
