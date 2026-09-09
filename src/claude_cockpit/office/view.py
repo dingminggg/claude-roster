@@ -142,11 +142,19 @@ class OfficeWindow(QMainWindow):
             self._framed = True
 
     def refit_scene(self) -> None:
-        """sceneRect 跟着内容长:否则把地毯拖到边界就走不动了,「无限画布」是假的。"""
+        """sceneRect 跟着内容长:否则把地毯拖到边界就走不动了,「无限画布」是假的。
+
+        改 sceneRect 会让视图重新锚定滚动位置——拖完工位 400ms 后存盘顺带 refit,
+        镜头就自己跳回去了。所以前后把视口中心钉住。
+        """
         r = self.scene.itemsBoundingRect()
         if r.isEmpty():
             r = QRectF(0, 0, 800, 600)
+        vp = self._canvas.viewport().rect()
+        center = self._canvas.mapToScene(vp.center()) if vp.isValid() else None
         self.scene.setSceneRect(r.adjusted(-600, -400, 600, 400))
+        if center is not None:
+            self._canvas.centerOn(center)
 
     def focus_content(self) -> None:
         """把视口挪到办公室的左上角。

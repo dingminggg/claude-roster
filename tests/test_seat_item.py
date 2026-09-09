@@ -99,13 +99,14 @@ def test_hit_confirm_buttons(seat):
 def test_down_seat_does_not_emit_clicked(app, seat):
     """未运行的工位点桌面没反应——只有启动键能开(硬约束 3:自动动作绝不 launch)。"""
     from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent
-    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QEvent, Qt
     got = []
     seat.clicked.connect(got.append)
     scene = QGraphicsScene()
     scene.addItem(seat)
     ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
     ev.setPos(QPointF(60, 40))          # 桌面空白
+    ev.setButton(Qt.MouseButton.LeftButton)
     seat.set_run_state("down")
     seat.mousePressEvent(ev)
     assert got == []
@@ -126,11 +127,15 @@ def test_paint_does_not_crash_in_any_state(app, seat):
 
 
 def _press(seat, x, y):
-    """造一个鼠标按下事件打到工位的局部坐标 (x, y)。"""
-    from PySide6.QtCore import QEvent
+    """造一次**左键**按下打到工位的局部坐标 (x, y)。
+
+    必须显式设 button:不设就是 Qt.NoButton,会被「只处理左键」那道拦截挡掉。
+    """
+    from PySide6.QtCore import QEvent, Qt as _Qt
     from PySide6.QtWidgets import QGraphicsSceneMouseEvent
     ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
     ev.setPos(QPointF(x, y))
+    ev.setButton(_Qt.MouseButton.LeftButton)
     seat.mousePressEvent(ev)
 
 
@@ -185,7 +190,7 @@ def test_press_speaker_emits_only_while_speaking(app, seat):
 
 def test_moved_only_fires_when_position_actually_changed(app, seat):
     """点一下工位不该触发存盘;只有真拖动过才发 moved。"""
-    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QEvent, Qt
     from PySide6.QtWidgets import QGraphicsSceneMouseEvent
     got = []
     seat.moved.connect(got.append)
@@ -194,6 +199,7 @@ def test_moved_only_fires_when_position_actually_changed(app, seat):
     def release():
         ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMouseRelease)
         ev.setPos(QPointF(60, 40))
+        ev.setButton(Qt.MouseButton.LeftButton)
         seat.mouseReleaseEvent(ev)
 
     _press(seat, 60, 40)                # 点桌面没挪
@@ -204,3 +210,42 @@ def test_moved_only_fires_when_position_actually_changed(app, seat):
     seat.setPos(300, 200)               # 拖走
     release()
     assert got == ["fad"]
+
+
+def _press_button(seat, x, y, button):
+    from PySide6.QtCore import QEvent, Qt as _Qt
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+    ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    ev.setPos(QPointF(x, y))
+    ev.setButton(button)
+    seat.mousePressEvent(ev)
+    return ev
+
+
+def test_right_click_does_not_trigger_click_or_picker(app, seat):
+    """右键只该弹菜单:不许顺带把控制台最大化,也不许弹会话下拉。"""
+    from PySide6.QtCore import Qt as _Qt
+    clicks, pickers, starts = [], [], []
+    seat.clicked.connect(clicks.append)
+    seat.picker_clicked.connect(pickers.append)
+    seat.start_clicked.connect(starts.append)
+
+    seat.set_run_state("busy")
+    _press_button(seat, 60, 40, _Qt.MouseButton.RightButton)     # 右键点桌面
+    assert clicks == []
+
+    seat.set_run_state("down")
+    _press_button(seat, 120, 70, _Qt.MouseButton.RightButton)    # 右键点会话行
+    _press_button(seat, 120, 92, _Qt.MouseButton.RightButton)    # 右键点启动键
+    assert pickers == [] and starts == []
+    assert seat.hit(QPointF(120, 92)) == "go"                    # 没被展开成确认态
+
+
+def test_left_click_still_works(app, seat):
+    """确认上面那道拦截没把左键一起挡掉。"""
+    from PySide6.QtCore import Qt as _Qt
+    clicks = []
+    seat.clicked.connect(clicks.append)
+    seat.set_run_state("busy")
+    _press_button(seat, 60, 40, _Qt.MouseButton.LeftButton)
+    assert clicks == ["fad"]

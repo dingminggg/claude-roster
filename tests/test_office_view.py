@@ -237,3 +237,23 @@ def test_picker_menu_built_from_real_sessions(win, app):
     win.start_requested.connect(lambda n, sid: got.append((n, sid)))
     win.seats["fad"].confirmed.emit("fad")
     assert got == [("fad", "s-new")]        # 默认选中最近一条
+
+
+def test_refit_scene_keeps_camera_put(win, app):
+    """拖完工位 400ms 后存盘会顺带 refit,镜头不许自己跳回去。"""
+    win.resize(700, 500)
+    win.show()
+    app.processEvents()
+    canvas = win.centralWidget()
+    canvas.centerOn(900, 700)
+    app.processEvents()
+
+    def center():
+        return canvas.mapToScene(canvas.viewport().rect().center())
+
+    before = center()
+    win.seats["fad"].setPos(600, 400)      # 把工位拖远,内容包围盒变大
+    win.save_layout()                      # 里面会 refit_scene
+    app.processEvents()
+    after = center()
+    assert (after - before).manhattanLength() < 20

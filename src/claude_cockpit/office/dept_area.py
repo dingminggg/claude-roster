@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 GRIP = 14                       # 右下角拉伸角的边长
 AREA_MIN = (200.0, 120.0)       # 与 layout.AREA_MIN 一致
+CONTENT_PAD = 10.0              # 收缩时给最靠边的那个工位留的边
 CARPET = QColor("#252b32")
 EDGE = QColor("#3a4150")
 LABEL = QColor("#7d8694")
@@ -37,11 +38,25 @@ class DeptAreaItem(QGraphicsObject):
     def geometry(self) -> tuple[float, float, float, float]:
         return (self.pos().x(), self.pos().y(), self.w, self.h)
 
+    def content_min(self) -> tuple[float, float]:
+        """地毯至少要多大才装得下现有的工位(工位是子项,位置由用户拖出来的)。
+
+        光用固定下限不够:工位可以被拖到地毯右下角,那时候还按 200×120 收缩,
+        地毯就缩到工位下面去了。
+        """
+        w, h = AREA_MIN
+        for it in self.childItems():
+            r = it.boundingRect()
+            w = max(w, it.pos().x() + r.width() + CONTENT_PAD)
+            h = max(h, it.pos().y() + r.height() + CONTENT_PAD)
+        return (w, h)
+
     def resize_to(self, pos: QPointF) -> None:
         """按局部坐标里的一点定尺寸(夹到最小值)。拉伸只改尺寸,不动位置。"""
+        min_w, min_h = self.content_min()
         self.prepareGeometryChange()
-        self.w = max(AREA_MIN[0], float(pos.x()))
-        self.h = max(AREA_MIN[1], float(pos.y()))
+        self.w = max(min_w, float(pos.x()))
+        self.h = max(min_h, float(pos.y()))
         self.update()
 
     def paint(self, p: QPainter, opt, widget) -> None:
@@ -62,6 +77,9 @@ class DeptAreaItem(QGraphicsObject):
                        QPointF(g.right() - 2, g.bottom() - d))
 
     def mousePressEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton:
+            e.ignore()          # 右键只该弹菜单,别把地毯拖走/拉伸
+            return
         if self.r_grip().contains(e.pos()):
             self._resizing = True       # 抓着角就只改大小,别顺手把地毯拖走
             e.accept(); return

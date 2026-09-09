@@ -326,6 +326,11 @@ class SeatItem(QGraphicsObject):
         self.update()
 
     def mousePressEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton:
+            # 右键只该弹菜单。不挡掉的话,右键落在会话行上会弹会话下拉、
+            # 落在桌面上会被当成「点工位」把控制台最大化。
+            e.ignore()
+            return
         where = self.hit(e.pos())
         if where == "go":
             self.set_confirm(True)
@@ -350,6 +355,9 @@ class SeatItem(QGraphicsObject):
         super().mousePressEvent(e)      # 桌面空白 = 拖动
 
     def mouseReleaseEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton:
+            e.ignore()
+            return
         super().mouseReleaseEvent(e)
         # 只有真挪过才算「拖完了」。按在启动键/确认/会话行上的那些点击压根不进
         # 这个分支(它们在 press 里就 return 了),但普通点桌面也会走到这儿——
