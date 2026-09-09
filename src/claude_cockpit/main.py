@@ -324,7 +324,7 @@ def main() -> int:
         try:
             m = Member(name=data["name"], cwd=Path(data["cwd"]), emoji=data["emoji"],
                        color=data["color"], model=data["model"],
-                       permission_mode=data["permission_mode"])
+                       permission_mode=data["permission_mode"], dept=data.get("dept", ""))
             validate_member(m, existing_names=set(by_name))
         except Exception as e:
             QMessageBox.warning(panel, "添加失败", str(e))
@@ -343,7 +343,7 @@ def main() -> int:
         try:
             new = Member(name=name, cwd=Path(data["cwd"]), emoji=data["emoji"],
                          color=data["color"], model=data["model"],
-                         permission_mode=data["permission_mode"])
+                         permission_mode=data["permission_mode"], dept=data.get("dept", ""))
             validate_member(new)            # 名字没变,不查重名
         except Exception as e:
             QMessageBox.warning(panel, "保存失败", str(e))

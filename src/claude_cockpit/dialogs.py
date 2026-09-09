@@ -43,6 +43,10 @@ def member_dialog(parent, member=None) -> dict | None:
     color = QLineEdit(member.color if editing else "#3b82f6")
     form.addRow("颜色", color)
 
+    dept = QLineEdit(member.dept if editing else "")
+    dept.setPlaceholderText("留空 → 未分配")
+    form.addRow("部门", dept)
+
     model = QComboBox()
     model.addItems(MODELS)
     if editing and member.model:
@@ -72,4 +76,5 @@ def member_dialog(parent, member=None) -> dict | None:
         "color": color.text().strip() or "#3b82f6",
         "model": None if mdl == "(默认)" else mdl,
         "permission_mode": perm.currentText(),
+        "dept": dept.text().strip(),
     }
