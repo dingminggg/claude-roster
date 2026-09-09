@@ -18,7 +18,7 @@ class Member:
     color: str = "#3b82f6"
     model: str | None = None
     permission_mode: str = "default"
-    dept: str = ""
+    dept: str = ""          # 部门:画布上的地毯分区;空 → 归入「未分配」
 
 
 def validate_member(m: Member, existing_names: set[str] | None = None) -> None:
