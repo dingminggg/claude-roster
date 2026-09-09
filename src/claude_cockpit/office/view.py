@@ -21,9 +21,8 @@ from .. import layout as layout_mod
 from .. import settings
 from .dept_area import DeptAreaItem
 from .seat_item import SeatItem
+from .theme import CANVAS as BG, GRID
 
-BG = QColor("#181a1f")
-GRID = QColor("#20232a")
 ZOOM_MIN, ZOOM_MAX = 0.5, 2.0
 SAVE_DEBOUNCE_MS = 400
 
@@ -313,16 +312,18 @@ class OfficeWindow(QMainWindow):
 
     def showEvent(self, e):
         super().showEvent(e)
-        self._dark_titlebar()
+        self._titlebar_theme()
 
-    def _dark_titlebar(self) -> None:
-        """把标题栏刷成深色(DWM)。窗口是深色的,标题栏还白着很割裂。
+    def _titlebar_theme(self) -> None:
+        """让标题栏跟随画布的明暗(DWM)。画布是浅色的,标题栏还黑着很割裂
+        ——旧的卡片面板是深色主题所以刷黑,换浅色主题后要跟着改回来。
         20 / 19 是新旧两版 Windows 的属性号,都试一遍;不支持就算了,全吞。"""
+        dark = BG.lightness() < 128
         try:
             import ctypes
             hwnd = int(self.winId())
             for attr in (20, 19):
-                v = ctypes.c_int(1)
+                v = ctypes.c_int(1 if dark else 0)
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
         except Exception:

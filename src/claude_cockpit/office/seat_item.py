@@ -17,18 +17,15 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
+from .theme import (
+    BADGE, BADGE_EDGE, BADGE_OFF, BADGE_TXT, CHAIR, CHAIR_SEAT, DESK,
+    DESK_EDGE, DESK_EDGE_OFF, DESK_OFF, DIM, FLOOR, FLOOR_HOVER, GEAR, HEAD, KEYS, MOUSE,
+    NO_BG, NO_FG, OFF_OPACITY, OFF_TINT, PART, PART_TOP, PLANT, PLANT_OFF,
+    PLANT_POT, TXT, YES_BG, YES_FG, mix,
+)
+
 SEAT_W, SEAT_H = 180, 112
 
-FLOOR = QColor("#1f2229")
-FLOOR_HOVER = QColor("#242832")
-PART = QColor("#343a46")
-PART_TOP = QColor("#434a59")
-DESK = QColor("#4a3d2e")
-DESK_EDGE = QColor("#5c4c39")
-GEAR = QColor("#1b1e24")
-CHAIR = QColor("#2f343f")
-TXT = QColor("#eaecef")
-DIM = QColor("#6e7682")
 
 def _font(size: int, bold: bool = False) -> QFont:
     f = QFont()
@@ -58,12 +55,14 @@ class _Style:
     glow: str
 
 
+# 浅底上的配色:胶囊用实色底 + 白字(浅底浅字看不清),屏幕光取更饱和的一档,
+# 否则洒在浅木色桌面上等于没有。
 STATE_STYLE = {
-    "down":      _Style("启动",   "#2f343f", "#c7ccd6", "#3a3f4b"),
-    "launching": _Style("启动中", "#8a6a1f", "#f7e9c8", "#d9a83c"),
-    "busy":      _Style("忙碌中", "#2b5f9e", "#dce9f7", "#5b9bd8"),
-    "idle":      _Style("空闲",   "#2e7d46", "#dff5e6", "#3fb27f"),
-    "running":   _Style("运行中", "#2e7d46", "#dff5e6", "#3fb27f"),
+    "down":      _Style("启动",   "#eef0f3", "#4b5563", "#c9ced6"),
+    "launching": _Style("启动中", "#c2760a", "#ffffff", "#f0a92e"),
+    "busy":      _Style("忙碌中", "#2563eb", "#ffffff", "#3b82f6"),
+    "idle":      _Style("空闲",   "#15803d", "#ffffff", "#22c55e"),
+    "running":   _Style("运行中", "#15803d", "#ffffff", "#22c55e"),
 }
 
 
@@ -184,15 +183,16 @@ class SeatItem(QGraphicsObject):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         up = self.is_up()
         st = STATE_STYLE[self._state]
-        p.setOpacity(1.0 if up else 0.55)
+        p.setOpacity(1.0 if up else OFF_OPACITY)
         flash = self.is_flashing()
         glow = QColor(st.glow)
-        if flash:
-            glow = glow.lighter(190)
+        # 浅底上不能用 lighter() 表示「更亮」——那只会变淡、更看不见。
+        # 闪的半拍改成:光晕加浓 + 整个工位地面染一层状态色。
 
         # 工位地面(部门地毯在底下透出来)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(FLOOR_HOVER if self._hover else FLOOR))
+        base = FLOOR_HOVER if self._hover else FLOOR
+        p.setBrush(QBrush(mix(base, glow, 0.22) if flash else base))
         path = QPainterPath()
         path.addRoundedRect(QRectF(0, 0, SEAT_W, SEAT_H), 8, 8)
         p.drawPath(path)
@@ -206,15 +206,15 @@ class SeatItem(QGraphicsObject):
         p.drawRect(QRectF(0, 0, 3, SEAT_H))
 
         # 大桌板:横跨上半,底边加亮做厚度
-        p.setBrush(QBrush(DESK))
+        p.setBrush(QBrush(DESK if up else DESK_OFF))
         p.drawRoundedRect(QRectF(12, 14, 156, 46), 3, 3)
-        p.setBrush(QBrush(DESK_EDGE))
+        p.setBrush(QBrush(DESK_EDGE if up else DESK_EDGE_OFF))
         p.drawRect(QRectF(12, 58, 156, 2))
 
         # 屏幕光:从显示器往下(朝员工)洒在桌面上
         if up:
             g = QLinearGradient(0, 26, 0, 58)
-            c0 = QColor(glow); c0.setAlpha(200 if flash else 120)
+            c0 = QColor(glow); c0.setAlpha(230 if flash else 150)
             c1 = QColor(glow); c1.setAlpha(0)
             g.setColorAt(0.0, c0)
             g.setColorAt(1.0, c1)
@@ -236,18 +236,20 @@ class SeatItem(QGraphicsObject):
         p.drawRect(QRectF(44, 30, 4, 4))
 
         # 键盘 + 鼠标:落在桌面上
-        p.setBrush(QBrush(QColor("#262a33")))
+        p.setBrush(QBrush(KEYS))
         p.drawRoundedRect(QRectF(28, 42, 34, 10), 2, 2)
-        p.setBrush(QBrush(QColor("#2e333d")))
+        p.setBrush(QBrush(MOUSE))
         p.drawEllipse(QRectF(66, 43, 6, 8))
 
         # 工牌:贴在桌面右侧,浅色卡 + 左侧成员配色条
-        p.setBrush(QBrush(QColor("#dfe4ec") if up else QColor("#9aa1ac")))
+        p.setPen(QPen(BADGE_EDGE, 1))
+        p.setBrush(QBrush(BADGE if up else BADGE_OFF))
         p.drawRoundedRect(QRectF(94, 20, 66, 20), 3, 3)
-        p.setBrush(QBrush(self.color if up else DIM))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(self.color if up else OFF_TINT))
         p.drawRoundedRect(QRectF(96, 22, 3, 16), 1.5, 1.5)
         p.setFont(FONT_NAME)
-        p.setPen(QPen(QColor("#1b1e24")))
+        p.setPen(QPen(BADGE_TXT))
         p.drawText(QRectF(102, 20, 56, 20),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                    _elide(self.name, 10))
@@ -263,11 +265,11 @@ class SeatItem(QGraphicsObject):
         p.setBrush(QBrush(CHAIR))
         p.drawRoundedRect(QRectF(24, 70, 5, 16), 2, 2)
         p.drawRoundedRect(QRectF(53, 70, 5, 16), 2, 2)
-        p.setBrush(QBrush(QColor("#383e4a") if up else QColor("#2a2e37")))
+        p.setBrush(QBrush(CHAIR_SEAT))
         p.drawRoundedRect(QRectF(28, 66, 26, 26), 7, 7)
-        p.setBrush(QBrush(self.color if up else DIM))
+        p.setBrush(QBrush(self.color if up else OFF_TINT))
         p.drawRoundedRect(QRectF(25, 90, 32, 9), 4, 4)
-        p.setBrush(QBrush(QColor("#2b2f3a")))
+        p.setBrush(QBrush(HEAD))
         p.drawEllipse(QRectF(32, 68, 22, 22))
         p.setFont(FONT_EMOJI)
         p.setPen(QPen(TXT))
@@ -275,9 +277,9 @@ class SeatItem(QGraphicsObject):
 
         # 绿植:右下角
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor("#3c3a2e")))
+        p.setBrush(QBrush(PLANT_POT))
         p.drawRoundedRect(QRectF(160, 94, 12, 10), 2, 2)
-        p.setBrush(QBrush(QColor("#3e7d52") if up else QColor("#3a4a3e")))
+        p.setBrush(QBrush(PLANT if up else PLANT_OFF))
         p.drawEllipse(QRectF(158, 84, 16, 14))
 
         # 右下:状态胶囊 / 会话行 / 启动键
@@ -302,13 +304,13 @@ class SeatItem(QGraphicsObject):
             p.setFont(FONT_PILL)
             p.setPen(Qt.PenStyle.NoPen)
             if self._confirm:
-                p.setBrush(QBrush(QColor("#2e7d46")))
+                p.setBrush(QBrush(YES_BG))
                 p.drawRoundedRect(self.r_yes(), 10, 10)
-                p.setBrush(QBrush(QColor("#3a3f4b")))
+                p.setBrush(QBrush(NO_BG))
                 p.drawRoundedRect(self.r_no(), 10, 10)
-                p.setPen(QPen(QColor("#dff5e6")))
+                p.setPen(QPen(YES_FG))
                 p.drawText(self.r_yes(), Qt.AlignmentFlag.AlignCenter, "✓")
-                p.setPen(QPen(QColor("#cdd2db")))
+                p.setPen(QPen(NO_FG))
                 p.drawText(self.r_no(), Qt.AlignmentFlag.AlignCenter, "✕")
             else:
                 p.setBrush(QBrush(QColor(st.pill_bg)))

@@ -9,12 +9,12 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
-GRIP = 14                       # 右下角拉伸角的边长
+from .theme import CARPET, CARPET_EDGE as EDGE, CARPET_LABEL as LABEL
+from .theme import GRIP as GRIP_COLOR
+
+GRIP = 14                       # 右下角拉伸角的边长(px,别和 theme 的颜色撞名)
 AREA_MIN = (200.0, 120.0)       # 与 layout.AREA_MIN 一致
 CONTENT_PAD = 10.0              # 收缩时给最靠边的那个工位留的边
-CARPET = QColor("#252b32")
-EDGE = QColor("#3a4150")
-LABEL = QColor("#7d8694")
 
 
 class DeptAreaItem(QGraphicsObject):
@@ -70,7 +70,7 @@ class DeptAreaItem(QGraphicsObject):
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                    self.name)
         # 拉伸角:三条斜线,常见 resize handle 的样子
-        p.setPen(QPen(QColor("#5a6373"), 1.4))
+        p.setPen(QPen(GRIP_COLOR, 1.4))
         g = self.r_grip()
         for d in (3, 7, 11):
             p.drawLine(QPointF(g.right() - d, g.bottom() - 2),
