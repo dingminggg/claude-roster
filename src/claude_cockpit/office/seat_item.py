@@ -30,6 +30,22 @@ CHAIR = QColor("#2f343f")
 TXT = QColor("#eaecef")
 DIM = QColor("#6e7682")
 
+def _font(size: int, bold: bool = False) -> QFont:
+    f = QFont()
+    f.setPointSize(size)
+    f.setBold(bold)
+    return f
+
+
+# 字号从不随状态变:提到模块级建一次。paint 每帧重建 QFont 要走字体匹配查找,
+# 而 paint 是「每个工位 × 每次 tick/闪烁/悬停」都跑的。
+FONT_NAME = _font(8, bold=True)     # 工牌上的成员名
+FONT_SPEAKER = _font(9)             # 朗读小喇叭
+FONT_EMOJI = _font(11)              # 椅子上的员工
+FONT_PILL = _font(8, bold=True)     # 状态胶囊 / 启动键
+FONT_SUB = _font(8)                 # 会话行 / 控制台标题
+
+
 # 「起来了」的状态:明暗、手型、屏幕闪统一按它判断,别散着写 == "running"
 UP_STATES = ("running", "busy", "idle")
 
@@ -78,6 +94,7 @@ class SeatItem(QGraphicsObject):
         self._title = ""
         self._sub = "新会话"
         self._hover = False
+        self._press_pos = None          # 按下时的位置,用来判断松手时是否真挪过
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable
                       | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
@@ -229,7 +246,7 @@ class SeatItem(QGraphicsObject):
         p.drawRoundedRect(QRectF(94, 20, 66, 20), 3, 3)
         p.setBrush(QBrush(self.color if up else DIM))
         p.drawRoundedRect(QRectF(96, 22, 3, 16), 1.5, 1.5)
-        f = QFont(); f.setPointSize(8); f.setBold(True); p.setFont(f)
+        p.setFont(FONT_NAME)
         p.setPen(QPen(QColor("#1b1e24")))
         p.drawText(QRectF(102, 20, 56, 20),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
@@ -237,7 +254,7 @@ class SeatItem(QGraphicsObject):
 
         # 朗读中:工牌右侧一个小喇叭,点它停播
         if up and self._speaking:
-            f2 = QFont(); f2.setPointSize(9); p.setFont(f2)
+            p.setFont(FONT_SPEAKER)
             p.setPen(QPen(TXT))
             p.drawText(self.r_speaker(), Qt.AlignmentFlag.AlignCenter, "🔊")
 
@@ -252,7 +269,7 @@ class SeatItem(QGraphicsObject):
         p.drawRoundedRect(QRectF(25, 90, 32, 9), 4, 4)
         p.setBrush(QBrush(QColor("#2b2f3a")))
         p.drawEllipse(QRectF(32, 68, 22, 22))
-        f3 = QFont(); f3.setPointSize(11); p.setFont(f3)
+        p.setFont(FONT_EMOJI)
         p.setPen(QPen(TXT))
         p.drawText(QRectF(32, 68, 22, 22), Qt.AlignmentFlag.AlignCenter, self.emoji)
 
@@ -264,27 +281,25 @@ class SeatItem(QGraphicsObject):
         p.drawEllipse(QRectF(158, 84, 16, 14))
 
         # 右下:状态胶囊 / 会话行 / 启动键
-        f4 = QFont(); f4.setPointSize(8); f4.setBold(True)
-        f5 = QFont(); f5.setPointSize(8)
         if up:
-            p.setFont(f4)
+            p.setFont(FONT_PILL)
             p.setBrush(QBrush(QColor(st.pill_bg)))
             p.drawRoundedRect(QRectF(96, 64, 56, 20), 10, 10)
             p.setPen(QPen(QColor(st.pill_fg)))
             p.drawText(QRectF(96, 64, 56, 20),
                        Qt.AlignmentFlag.AlignCenter, st.label)
-            p.setFont(f5)
+            p.setFont(FONT_SUB)
             p.setPen(QPen(DIM))
             p.drawText(QRectF(94, 86, 62, 18),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                        _elide(self._title, 9))
         else:
-            p.setFont(f5)
+            p.setFont(FONT_SUB)
             p.setPen(QPen(DIM))
             p.drawText(self.r_picker(),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                        "▾ " + _elide(self._sub, 12))
-            p.setFont(f4)
+            p.setFont(FONT_PILL)
             p.setPen(Qt.PenStyle.NoPen)
             if self._confirm:
                 p.setBrush(QBrush(QColor("#2e7d46")))
@@ -331,8 +346,15 @@ class SeatItem(QGraphicsObject):
             e.accept(); return
         if self.is_up():
             self.clicked.emit(self.name)
+        self._press_pos = self.pos()    # 记下起点,松手时判断到底有没有挪
         super().mousePressEvent(e)      # 桌面空白 = 拖动
 
     def mouseReleaseEvent(self, e):
         super().mouseReleaseEvent(e)
-        self.moved.emit(self.name)      # 拖完了(没动也发,无害)
+        # 只有真挪过才算「拖完了」。按在启动键/确认/会话行上的那些点击压根不进
+        # 这个分支(它们在 press 里就 return 了),但普通点桌面也会走到这儿——
+        # 不判断就会变成「点一下工位写一次盘」。
+        start = self._press_pos
+        self._press_pos = None
+        if start is not None and start != self.pos():
+            self.moved.emit(self.name)

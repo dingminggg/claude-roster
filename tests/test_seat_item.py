@@ -123,3 +123,84 @@ def test_paint_does_not_crash_in_any_state(app, seat):
         p = QPainter(img)
         seat.paint(p, None, None)
         p.end()
+
+
+def _press(seat, x, y):
+    """造一个鼠标按下事件打到工位的局部坐标 (x, y)。"""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+    ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    ev.setPos(QPointF(x, y))
+    seat.mousePressEvent(ev)
+
+
+def test_press_start_button_emits_and_expands_confirm(app, seat):
+    """点启动键:发 start_clicked 且原地展开成 ✓/✕(不弹窗)。"""
+    got = []
+    seat.start_clicked.connect(got.append)
+    seat.set_run_state("down")
+    _press(seat, 120, 92)
+    assert got == ["fad"]
+    assert seat.hit(QPointF(105, 92)) == "yes"      # 已经是确认态
+
+
+def test_press_yes_emits_confirmed_and_collapses(app, seat):
+    got = []
+    seat.confirmed.connect(got.append)
+    seat.set_run_state("down")
+    seat.set_confirm(True)
+    _press(seat, 105, 92)
+    assert got == ["fad"]
+    assert seat.hit(QPointF(120, 92)) == "go"       # 收回成启动键
+
+
+def test_press_no_collapses_without_starting(app, seat):
+    got = []
+    seat.confirmed.connect(got.append)
+    seat.set_run_state("down")
+    seat.set_confirm(True)
+    _press(seat, 140, 92)
+    assert got == []
+    assert seat.hit(QPointF(120, 92)) == "go"
+
+
+def test_press_picker_emits(app, seat):
+    got = []
+    seat.picker_clicked.connect(got.append)
+    seat.set_run_state("down")
+    _press(seat, 120, 70)
+    assert got == ["fad"]
+
+
+def test_press_speaker_emits_only_while_speaking(app, seat):
+    got = []
+    seat.speaker_clicked.connect(got.append)
+    seat.set_run_state("busy")
+    _press(seat, 170, 30)               # 没在朗读:喇叭不存在,当点桌面
+    assert got == []
+    seat.set_speaking(True)
+    _press(seat, 170, 30)
+    assert got == ["fad"]
+
+
+def test_moved_only_fires_when_position_actually_changed(app, seat):
+    """点一下工位不该触发存盘;只有真拖动过才发 moved。"""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+    got = []
+    seat.moved.connect(got.append)
+    seat.set_run_state("busy")
+
+    def release():
+        ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMouseRelease)
+        ev.setPos(QPointF(60, 40))
+        seat.mouseReleaseEvent(ev)
+
+    _press(seat, 60, 40)                # 点桌面没挪
+    release()
+    assert got == []
+
+    _press(seat, 60, 40)
+    seat.setPos(300, 200)               # 拖走
+    release()
+    assert got == ["fad"]
