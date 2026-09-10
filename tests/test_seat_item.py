@@ -24,15 +24,17 @@ def seat(app):
 
 
 @pytest.mark.parametrize("state,text", [
-    ("down", "启动"),
+    ("down", "未上班"),
     ("launching", "启动中"),
     ("busy", "忙碌中"),
     ("idle", "空闲"),
     ("running", "运行中"),
 ])
 def test_label_per_state(seat, state, text):
+    """状态文字只出现在 tooltip 里——画面上状态是靠屏幕颜色表达的。"""
     seat.set_run_state(state)
     assert seat.status_text() == text
+    assert text in seat.toolTip()
 
 
 def test_up_states_are_exactly_the_three(seat):

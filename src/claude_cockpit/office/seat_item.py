@@ -40,7 +40,6 @@ def _font(size: int, bold: bool = False) -> QFont:
 FONT_NAME = _font(9, bold=True)     # 浮在头顶的成员名
 FONT_SPEAKER = _font(9)             # 朗读小喇叭
 FONT_EMOJI = _font(12)              # 脑袋上的 emoji
-FONT_PILL = _font(8, bold=True)     # 状态胶囊 / 启动键
 FONT_SUB = _font(8)                 # 会话行 / 控制台标题
 
 
@@ -50,19 +49,16 @@ UP_STATES = ("running", "busy", "idle")
 
 @dataclass(frozen=True)
 class _Style:
-    label: str
-    pill_bg: str
-    pill_fg: str
-    glow: str
+    label: str      # 只出现在 tooltip 里(画面上不写状态文字)
+    glow: str       # 屏幕颜色 —— 这才是状态的表达方式
 
 
-# 屏幕色 = 状态色;胶囊用实色底 + 白字(浅底浅字看不清)。
 STATE_STYLE = {
-    "down":      _Style("启动",   "#eef0f3", "#4b5563", "#c9ced6"),
-    "launching": _Style("启动中", "#c2760a", "#ffffff", "#f0a92e"),
-    "busy":      _Style("忙碌中", "#2563eb", "#ffffff", "#3b82f6"),
-    "idle":      _Style("空闲",   "#15803d", "#ffffff", "#22c55e"),
-    "running":   _Style("运行中", "#15803d", "#ffffff", "#22c55e"),
+    "down":      _Style("未上班", "#c9ced6"),
+    "launching": _Style("启动中", "#f0a92e"),
+    "busy":      _Style("忙碌中", "#3b82f6"),
+    "idle":      _Style("空闲",   "#22c55e"),
+    "running":   _Style("运行中", "#22c55e"),
 }
 
 
@@ -99,6 +95,8 @@ class SeatItem(QGraphicsObject):
         self._state = state if state in STATE_STYLE else "running"
         self.setCursor(Qt.CursorShape.PointingHandCursor if self.is_up()
                        else Qt.CursorShape.ArrowCursor)
+        # 状态本身靠屏幕颜色表达,画面上不写字;文字版挂 tooltip,悬停查得到
+        self.setToolTip(f"{self.name} · {self.status_text()}")
         self.update()
 
     def set_message(self, on: bool) -> None:
@@ -235,19 +233,14 @@ class SeatItem(QGraphicsObject):
             p.drawText(self.r_speaker(), Qt.AlignmentFlag.AlignCenter, "🔊")
         p.setPen(Qt.PenStyle.NoPen)
 
-        # 底部一行:状态胶囊 + 控制台标题(没上班时是上次会话)。**只读**,
-        # 所有操作都在右键菜单里,工位上不放按钮。
-        p.setFont(FONT_PILL)
-        p.setBrush(QBrush(QColor(st.pill_bg)))
-        p.drawRoundedRect(QRectF(14, 144, 56, 18), 9, 9)
-        p.setPen(QPen(QColor(st.pill_fg)))
-        p.drawText(QRectF(14, 144, 56, 18), Qt.AlignmentFlag.AlignCenter,
-                   st.label if up else "未上班")
+        # 底部一行:只有控制台标题(没上班时是上次会话)。
+        # **状态不写字**——忙/闲/启动中全靠屏幕颜色表达,底下再挂个胶囊是重复。
+        # 文字版状态留在 tooltip 里(见 set_run_state),悬停查得到。
         p.setFont(FONT_SUB)
         p.setPen(QPen(DIM))
-        p.drawText(QRectF(76, 144, 116, 18),
-                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                   _elide(self._title if up else self._sub, 16))
+        p.drawText(QRectF(14, 144, 172, 18),
+                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter,
+                   _elide(self._title if up else self._sub, 24))
 
     # ---------- 交互 ----------
     def hoverEnterEvent(self, e):
