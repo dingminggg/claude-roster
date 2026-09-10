@@ -11,9 +11,17 @@ from __future__ import annotations
 
 from PySide6.QtGui import QColor
 
-# ---------- 画布 ----------
-CANVAS = QColor("#f4f5f7")      # 大背景:柔和的白,略带灰
-GRID = QColor("#e7e9ee")        # 背景网格:看得见但不抢戏
+# ---------- 画布(地板) ----------
+CANVAS = QColor("#f3f2f0")      # 大背景:柔和的白,略带暖,读起来像地面而不是纸
+GRID = QColor("#e6e4e1")        # 地砖缝:看得见但不抢戏
+TILE_ALT = QColor("#efedea")    # 隔一块深一点,像铺开的方砖(纯网格线太像方格纸)
+TILE = 60                       # 地砖边长(px)
+
+# ---------- 阴影(高度感) ----------
+# 正俯视 + 零高度会让所有东西像贴纸。给桌板/隔断/显示器/椅子加投影和侧壁,
+# 东西才有体积。阴影一律用低透明度纯黑,别用带色阴影(浅底上会脏)。
+SHADOW = QColor(0, 0, 0, 26)
+SHADOW_SOFT = QColor(0, 0, 0, 16)
 
 # ---------- 部门地毯 ----------
 CARPET = QColor("#e9ecf1")
@@ -24,10 +32,11 @@ GRIP = QColor("#9aa3b0")            # 右下角拉伸角
 # ---------- 工位 ----------
 FLOOR = QColor("#fbfcfd")       # 工位地面:比地毯亮一档,压出「这是一个格子」
 FLOOR_HOVER = QColor("#ffffff")
-PART = QColor("#dbe0e8")        # 隔断板
+PART = QColor("#dbe0e8")        # 隔断板(侧面)
 PART_TOP = QColor("#eef1f5")    # 隔断顶面(受光面,亮一档做厚度)
+PART_SIDE = QColor("#c4cbd6")   # 隔断朝内的那面墙:压暗一档,板子才有厚度
 DESK = QColor("#d9bd94")        # 桌板:浅木色
-DESK_EDGE = QColor("#c3a375")   # 桌板底边(厚度)
+DESK_EDGE = QColor("#c3a375")   # 桌板前沿(看得见的那道板厚)
 DESK_OFF = QColor("#dcd8d1")    # 没人时的桌板:抽掉木色的暖调,一眼看出这位没上班
 DESK_EDGE_OFF = QColor("#c8c3ba")
 GEAR = QColor("#3b424c")        # 显示器背壳 / 支架:浅底上要够深才看得出是设备

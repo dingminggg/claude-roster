@@ -21,7 +21,7 @@ from .. import layout as layout_mod
 from .. import settings
 from .dept_area import DeptAreaItem
 from .seat_item import SeatItem
-from .theme import CANVAS as BG, GRID
+from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 
 ZOOM_MIN, ZOOM_MAX = 0.5, 2.0
 SAVE_DEBOUNCE_MS = 400
@@ -46,18 +46,36 @@ class _Canvas(QGraphicsView):
             QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
     def drawBackground(self, p, rect):
+        """地板:方砖 + 砖缝。
+
+        原来是每 30px 一条线的网格,读起来像方格纸;改成 60px 的砖、隔一块深一档,
+        才像铺在地上的地面。
+        """
         super().drawBackground(p, rect)
-        p.setPen(QPen(GRID, 1))
-        step = 30
         r = rect.toRect()
-        x = r.left() - (r.left() % step)
+        x0 = r.left() - (r.left() % TILE)
+        y0 = r.top() - (r.top() % TILE)
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(TILE_ALT))
+        y = y0
+        while y < r.bottom():
+            x = x0
+            while x < r.right():
+                if ((x // TILE) + (y // TILE)) % 2:      # 棋盘式隔一块
+                    p.drawRect(x, y, TILE, TILE)
+                x += TILE
+            y += TILE
+
+        p.setPen(QPen(GRID, 1))
+        x = x0
         while x < r.right():
             p.drawLine(x, r.top(), x, r.bottom())
-            x += step
-        y = r.top() - (r.top() % step)
+            x += TILE
+        y = y0
         while y < r.bottom():
             p.drawLine(r.left(), y, r.right(), y)
-            y += step
+            y += TILE
 
     def wheelEvent(self, e):
         if e.modifiers() & Qt.KeyboardModifier.ControlModifier:

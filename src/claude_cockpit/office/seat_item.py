@@ -20,7 +20,8 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 from .theme import (
     CHAIR, CHAIR_SEAT, DESK, DESK_EDGE, DESK_EDGE_OFF, DESK_OFF, DIM, FLOOR,
     FLOOR_HOVER, GEAR, HEAD, KEYS, MOUSE, NO_BG, NO_FG, OFF_OPACITY, OFF_TINT,
-    PART, PART_TOP, PLANT, PLANT_OFF, PLANT_POT, TXT, YES_BG, YES_FG, mix,
+    PART, PART_SIDE, PART_TOP, PLANT, PLANT_OFF, PLANT_POT, SHADOW,
+    SHADOW_SOFT, TXT, YES_BG, YES_FG, mix,
 )
 
 SEAT_W, SEAT_H = 180, 112
@@ -188,27 +189,40 @@ class SeatItem(QGraphicsObject):
         # 浅底上不能用 lighter() 表示「更亮」——那只会变淡、更看不见。
         # 闪的半拍改成:光晕加浓 + 整个工位地面染一层状态色。
 
-        # 工位地面(部门地毯在底下透出来)
+        # 工位投影:整块离地一点点,俯视才不像贴纸
         p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(SHADOW_SOFT))
+        p.drawRoundedRect(QRectF(2, 4, SEAT_W - 2, SEAT_H - 2), 8, 8)
+
+        # 工位地面(部门地毯在底下透出来)
         base = FLOOR_HOVER if self._hover else FLOOR
         p.setBrush(QBrush(mix(base, glow, 0.22) if flash else base))
         path = QPainterPath()
         path.addRoundedRect(QRectF(0, 0, SEAT_W, SEAT_H), 8, 8)
         p.drawPath(path)
 
-        # L 形隔断:上 / 左两面板,顶面亮一档制造厚度
+        # L 形隔断:顶面(受光)亮一档、朝内的侧壁压暗一档,板子才有厚度
         p.setBrush(QBrush(PART))
         p.drawRect(QRectF(0, 0, SEAT_W, 10))
         p.drawRect(QRectF(0, 0, 8, SEAT_H))
         p.setBrush(QBrush(PART_TOP))
         p.drawRect(QRectF(0, 0, SEAT_W, 3))
         p.drawRect(QRectF(0, 0, 3, SEAT_H))
+        p.setBrush(QBrush(PART_SIDE))
+        p.drawRect(QRectF(0, 10, SEAT_W, 2))
+        p.drawRect(QRectF(8, 10, 2, SEAT_H - 10))
+        # 隔断打在地面上的影子
+        p.setBrush(QBrush(SHADOW_SOFT))
+        p.drawRect(QRectF(0, 12, SEAT_W, 3))
+        p.drawRect(QRectF(10, 12, 3, SEAT_H - 12))
 
         # 大桌板:横跨上半,底边加亮做厚度
+        p.setBrush(QBrush(SHADOW))
+        p.drawRoundedRect(QRectF(13, 20, 156, 46), 3, 3)      # 桌子的影子
         p.setBrush(QBrush(DESK if up else DESK_OFF))
         p.drawRoundedRect(QRectF(12, 14, 156, 46), 3, 3)
         p.setBrush(QBrush(DESK_EDGE if up else DESK_EDGE_OFF))
-        p.drawRect(QRectF(12, 58, 156, 2))
+        p.drawRect(QRectF(12, 56, 156, 4))                    # 看得见的板厚(前沿)
 
         # 屏幕光:从显示器往下(朝员工)洒在桌面上
         if up:
@@ -227,6 +241,8 @@ class SeatItem(QGraphicsObject):
             p.drawPath(spill)
 
         # 显示器:俯视是背壳 + 支架,屏幕下沿漏一条光
+        p.setBrush(QBrush(SHADOW))
+        p.drawRoundedRect(QRectF(31, 21, 32, 12), 2, 2)
         p.setBrush(QBrush(GEAR))
         p.drawRoundedRect(QRectF(30, 18, 32, 12), 2, 2)
         p.setBrush(QBrush(glow))
@@ -256,6 +272,8 @@ class SeatItem(QGraphicsObject):
 
         # 办公椅(俯视):靠背朝下,靠背用成员配色
         p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(SHADOW))
+        p.drawRoundedRect(QRectF(26, 70, 34, 30), 9, 9)       # 椅子的影子
         p.setBrush(QBrush(CHAIR))
         p.drawRoundedRect(QRectF(24, 70, 5, 16), 2, 2)
         p.drawRoundedRect(QRectF(53, 70, 5, 16), 2, 2)
