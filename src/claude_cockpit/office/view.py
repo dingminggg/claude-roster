@@ -23,7 +23,8 @@ from .dept_area import DeptAreaItem
 from .seat_item import SeatItem
 from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 
-ZOOM_MIN, ZOOM_MAX = 0.5, 2.0
+ZOOM_MIN, ZOOM_MAX = 0.35, 1.0   # 上限 1.0:放大到超出原始尺寸没意义,
+                                 # 只会让人看不全(缩放的下限由「适应窗口」算)
 SAVE_DEBOUNCE_MS = 400
 
 
@@ -156,8 +157,8 @@ class OfficeWindow(QMainWindow):
         # 每次都设的话,改一个成员的 emoji 就把窗口缩回存盘尺寸、视角弹回左上角
         if not self._framed:
             self.resize(*lay.window)
-            self.focus_content()
             self._framed = True
+        self.fit_content()
 
     def _area_at(self, seat) -> str | None:
         """工位中心落在哪块地毯上。压着两块边界时取 z 值最上面的那块。"""
@@ -239,26 +240,42 @@ class OfficeWindow(QMainWindow):
             r = QRectF(0, 0, 800, 600)
         vp = self._canvas.viewport().rect()
         center = self._canvas.mapToScene(vp.center()) if vp.isValid() else None
-        self.scene.setSceneRect(r.adjusted(-600, -400, 600, 400))
+        # 只留一圈窄边:留一大片空地的话,东西会被越拖越散,最后一眼看不全
+        self.scene.setSceneRect(r.adjusted(-60, -40, 60, 40))
         if center is not None:
             self._canvas.centerOn(center)
+        self._fit_if_needed()
 
-    def focus_content(self) -> None:
-        """把视口挪到办公室的左上角。
+    def fit_scale(self) -> float:
+        """把全部内容装进当前视口所需的缩放(不超过 1.0,也不缩到看不清)。"""
+        r = self.scene.itemsBoundingRect()
+        vp = self._canvas.viewport().size()
+        if r.isEmpty() or r.width() <= 0 or r.height() <= 0 or vp.width() <= 10:
+            return 1.0
+        pad = 24
+        k = min((vp.width() - pad) / r.width(), (vp.height() - pad) / r.height())
+        return max(ZOOM_MIN, min(1.0, k))
 
-        sceneRect 比内容大一圈(留出往外拖的余地),视口默认停在 sceneRect 中央,
-        结果一开窗看到的是半屏空地、办公室缩在角上。
+    def _fit_if_needed(self) -> None:
+        """只有「现在装不下了」才缩回去。
+
+        每次布局变动都无条件 fit 的话,拖完一个工位镜头就自己跳一下——之前踩过。
+        所以这里只保证下界:内容一旦超出视口,就缩到刚好看全;还装得下就别动。
         """
+        if self.fit_scale() < self.zoom - 0.01:
+            self.fit_content()
+
+    def fit_content(self) -> None:
+        """缩放到刚好装得下全部内容并居中——「一眼看全」是这个面板的本分,
+        所以它是默认行为:开窗、改窗口大小、布局变动之后都会重来一次。"""
         r = self.scene.itemsBoundingRect()
         if r.isEmpty():
             return
-        # 用 centerOn 而不是直接设滚动条:滚动条的数值起点跟着 sceneRect 走,
-        # sceneRect 起点不为零时自己算必偏。
-        vp = self._canvas.viewport().size()
-        margin = 12
-        self._canvas.centerOn(
-            r.left() - margin + vp.width() / 2 / self.zoom,
-            r.top() - margin + vp.height() / 2 / self.zoom)
+        self._apply_zoom(self.fit_scale())
+        self._canvas.centerOn(r.center())
+
+    # 老名字留着:main.py 之外没人叫它,但改名没必要牵连调用方
+    focus_content = fit_content
 
     # ---------- 对外接口(与 panel.Panel 同名同签名) ----------
     def set_run_state(self, name: str, state: str) -> None:
@@ -374,6 +391,7 @@ class OfficeWindow(QMainWindow):
         at = (scene_pos.x(), scene_pos.y()) if scene_pos is not None else None
         menu.addAction("新建部门区域").triggered.connect(
             lambda: self._ask_new_area(at))
+        menu.addAction("适应窗口").triggered.connect(self.fit_content)
         if area:
             menu.addSeparator()
             menu.addAction(f"重命名「{area}」").triggered.connect(
@@ -415,7 +433,9 @@ class OfficeWindow(QMainWindow):
 
     # ---------- 内部 ----------
     def _zoom_by(self, factor: float) -> None:
-        self._apply_zoom(self.zoom * factor)
+        """Ctrl+滚轮:仍然能手动缩放,但**下限就是「刚好看全」**,
+        不让人缩到比看全还小、或放大到超出原始尺寸——那都只会更看不全。"""
+        self._apply_zoom(max(self.fit_scale(), self.zoom * factor))
         self._queue_save()
 
     def _apply_zoom(self, z: float) -> None:
@@ -438,6 +458,10 @@ class OfficeWindow(QMainWindow):
         s["office"] = layout_mod.dump(lay)
         settings.save(s)
         self.refit_scene()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.fit_content()
 
     def showEvent(self, e):
         super().showEvent(e)

@@ -220,7 +220,8 @@ def test_session_row_shows_title_and_untitled_fallback(win):
 
 
 def test_refit_scene_keeps_camera_put(win, app):
-    """拖完工位 400ms 后存盘会顺带 refit,镜头不许自己跳回去。"""
+    """拖完工位 400ms 后存盘会顺带 refit。只要内容还装得下,镜头就不许自己跳
+    (装不下才缩回去,那是另一个测试的事)。"""
     win.resize(700, 500)
     win.show()
     app.processEvents()
@@ -232,7 +233,7 @@ def test_refit_scene_keeps_camera_put(win, app):
         return canvas.mapToScene(canvas.viewport().rect().center())
 
     before = center()
-    win.seats["fad"].setPos(600, 400)      # 把工位拖远,内容包围盒变大
+    win.seats["fad"].setPos(60, 60)        # 挪一点点:内容仍然装得下
     win.save_layout()                      # 里面会 refit_scene
     app.processEvents()
     after = center()
@@ -336,3 +337,33 @@ def test_canvas_menu_on_blank_offers_new_area(win):
     texts = [a.text() for a in win.build_canvas_menu(None).actions()]
     assert "新增成员" in texts and "新建部门区域" in texts
     assert not any(t.startswith("删除") for t in texts)
+
+
+def test_zoom_never_exceeds_one_or_goes_below_fit(win, app):
+    """手动缩放夹在「刚好看全」和 100% 之间:再放大只会更看不全,
+    再缩小也没意义(已经看全了)。"""
+    win.resize(700, 500)
+    win.show()
+    app.processEvents()
+    for _ in range(10):
+        win._zoom_by(1.15)
+    assert win.zoom <= 1.0
+    for _ in range(10):
+        win._zoom_by(1 / 1.15)
+    assert win.zoom >= win.fit_scale() - 0.01
+
+
+def test_content_growing_out_of_view_gets_refit(win, app):
+    """把地毯拖到很远 → 内容超出视口 → 自动缩回到看得全。"""
+    win.resize(700, 500)
+    win.show()
+    app.processEvents()
+    before = win.zoom
+    win.areas["后端组"].setPos(2400, 1800)
+    win.refit_scene()
+    app.processEvents()
+    assert win.zoom < before                  # 缩回去了
+    assert win.zoom == win.fit_scale()        # 缩到「刚好看全」那一档
+    # 注意:fit_scale 有 0.35 的下限——内容大到那个程度时,宁可看不全也不缩成蚂蚁
+    from claude_cockpit.office.view import ZOOM_MIN
+    assert win.zoom >= ZOOM_MIN
