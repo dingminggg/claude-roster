@@ -86,8 +86,10 @@ class SeatItem(QGraphicsObject):
         self._sub = "新会话"
         self._hover = False
         self._press_pos = None          # 按下时的位置,用来判断松手时是否真挪过
-        self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable
-                      | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        # 只要可拖,**不要 ItemIsSelectable**:Qt 拖一个图元时会把所有「选中的」
+        # 可移动图元一起拖走。工位可选的话,点过它之后再拖地毯,它会既作为子项
+        # 跟着父级走一次、又作为选中项被拖一次,比别人多挪一倍(踩过)。
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setAcceptHoverEvents(True)
 
     # ---------- 状态入口(由 OfficeWindow 转发 main 的 tick) ----------

@@ -113,3 +113,21 @@ def test_right_click_does_not_move_or_resize_area(area_with_seat):
     area.mousePressEvent(ev)
     area.mouseMoveEvent(ev)
     assert area.pos() == before_pos and (area.w, area.h) == before_size
+
+
+def test_dragging_area_does_not_double_move_a_touched_seat(area_with_seat):
+    """点过某个工位之后再拖地毯,那个工位不许比别人多挪一倍。
+
+    Qt 会把「选中的」可移动图元跟着一起拖,所以工位不能是 selectable
+    (它作为子项本来就会跟着父级走)。
+    """
+    from PySide6.QtWidgets import QGraphicsItem
+    area, seat = area_with_seat
+    assert not (seat.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+
+    seat.setSelected(True)                 # 没有该标志时这是空操作
+    before_local = seat.pos()
+    before_scene = seat.scenePos()
+    area.setPos(area.pos().x() + 100, area.pos().y() + 50)
+    assert seat.pos() == before_local                      # 相对坐标纹丝不动
+    assert seat.scenePos() == before_scene + QPointF(100, 50)   # 只跟着父级走一次
