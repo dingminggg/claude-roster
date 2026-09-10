@@ -24,7 +24,7 @@ from ..layout import SEAT_H, SEAT_W
 from .theme import (
     BEZEL, CHAIR, CHAIR_DARK, DESK_FRONT, DESK_FRONT_OFF, DESK_LEG, DESK_TOP,
     DESK_TOP_OFF, DIM, HEAD, MUG, NO_BG, NO_FG, OFF_OPACITY, SCREEN_OFF,
-    PAPER, PAPER_EDGE, PAPER_LINE, SHADOW, SHADOW_HARD, TXT, YES_BG, YES_FG,
+    PAPER, PAPER_EDGE, PAPER_LINE, SHADOW, SPEAKER, SPEAKER_CONE, WAVE, SHADOW_HARD, TXT, YES_BG, YES_FG,
 )
 
 
@@ -38,7 +38,6 @@ def _font(size: int, bold: bool = False) -> QFont:
 # 字号从不随状态变:提到模块级建一次。paint 每帧重建 QFont 要走字体匹配查找,
 # 而 paint 是「每个工位 × 每次 tick/闪烁/悬停」都跑的。
 FONT_NAME = _font(9, bold=True)     # 浮在头顶的成员名
-FONT_SPEAKER = _font(9)             # 朗读小喇叭
 FONT_EMOJI = _font(12)              # 脑袋上的 emoji
 FONT_SUB = _font(8)                 # 会话行 / 控制台标题
 
@@ -85,6 +84,7 @@ class SeatItem(QGraphicsObject):
         self._title = ""
         self._sub = "新会话"
         self._papers = 0                # 桌上那叠文件的张数 = 历史会话条数
+        self._wave = 0                  # 音浪动画的相位(朗读时才转)
         self._hover = False
         self._press_pos = None          # 按下时的位置,用来判断松手时是否真挪过
         # 只要可拖,**不要 ItemIsSelectable**:Qt 拖一个图元时会把所有「选中的」
@@ -111,8 +111,16 @@ class SeatItem(QGraphicsObject):
             self.update()
 
     def set_speaking(self, on: bool) -> None:
-        self._speaking = bool(on)
-        self.update()
+        if self._speaking != bool(on):
+            self._speaking = bool(on)
+            self._wave = 0
+            self.update()
+
+    def advance_wave(self) -> None:
+        """音浪往前走一帧(由 OfficeWindow 的定时器驱动,只在朗读时转)。"""
+        if self._speaking and self.is_up():
+            self._wave = (self._wave + 1) % 3
+            self.update()
 
     def set_title(self, text: str) -> None:
         self._title = text or ""
@@ -162,7 +170,8 @@ class SeatItem(QGraphicsObject):
         return QRectF(0, 0, SEAT_W, SEAT_H)
 
     def r_speaker(self) -> QRectF:
-        return QRectF(172, 0, 22, 16)
+        """桌上那个小音响:朗读时它冒音浪,点它停播。"""
+        return QRectF(28, 30, 28, 30)
 
     def r_person(self) -> QRectF:
         """人和椅子那一块:右键它 = 对这个人下命令(上班 / 下班)。"""
@@ -234,6 +243,19 @@ class SeatItem(QGraphicsObject):
         p.setBrush(QBrush(BEZEL))
         p.drawRect(QRectF(84, 44, 10, 4))                   # 支架
         p.drawRoundedRect(QRectF(78, 47, 22, 3), 1.5, 1.5)  # 底座
+        # 桌上的小音响(显示器左边)。朗读时从它右上方冒三格音浪
+        p.setBrush(QBrush(SPEAKER))
+        p.drawRoundedRect(QRectF(32, 34, 18, 24), 3, 3)
+        p.setBrush(QBrush(SPEAKER_CONE))
+        p.drawEllipse(QRectF(36, 44, 10, 10))               # 低音单元
+        p.drawEllipse(QRectF(39, 38, 4, 4))                 # 高音单元
+        if up and self._speaking:
+            # 三根竖条轮流窜高,像音量表在跳
+            heights = ((8, 14, 10), (13, 6, 16), (9, 17, 7))[self._wave]
+            p.setBrush(QBrush(WAVE))
+            for i, h in enumerate(heights):
+                p.drawRoundedRect(QRectF(53 + i * 5, 52 - h, 3.4, h), 1.6, 1.6)
+
         p.setBrush(QBrush(MUG))
         p.drawRoundedRect(QRectF(124, 44, 11, 11), 3, 3)    # 杯子
 
@@ -280,13 +302,6 @@ class SeatItem(QGraphicsObject):
         p.setPen(QPen(TXT if up else DIM))
         p.drawText(QRectF(0, 0, SEAT_W, 14),
                    Qt.AlignmentFlag.AlignCenter, _elide(self.name, 14))
-
-        # 朗读中:名字右边一个小喇叭,点它停播
-        if up and self._speaking:
-            p.setFont(FONT_SPEAKER)
-            p.setPen(QPen(TXT))
-            p.drawText(self.r_speaker(), Qt.AlignmentFlag.AlignCenter, "🔊")
-        p.setPen(Qt.PenStyle.NoPen)
 
 
     # ---------- 交互 ----------

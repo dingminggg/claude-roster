@@ -41,6 +41,11 @@ PAPER = QColor("#fdfdfe")           # 桌上那叠文件(一张 = 一条历史�
 PAPER_LINE = QColor("#c9ced8")      # 纸上那两条「字」
 PAPER_EDGE = QColor("#b9c0cb")      # 纸的边:白纸压白桌,不勾边看不出来
 
+# ---------- 桌上的小音响 ----------
+SPEAKER = QColor("#3b424c")         # 箱体
+SPEAKER_CONE = QColor("#6b7480")    # 喇叭单元
+WAVE = QColor("#f59e0b")            # 音浪:琥珀色,和状态色(蓝/绿)不撞
+
 # ---------- 电脑 ----------
 BEZEL = QColor("#2b2f36")       # 屏幕边框 / 支架:全白场景里唯一的深色物件
 SCREEN_OFF = QColor("#3d434c")  # 没开机的屏

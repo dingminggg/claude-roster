@@ -382,3 +382,13 @@ def test_size_menu_marks_current_scale(win):
     size = next(a.menu() for a in menu.actions() if a.text() == "大小")
     checked = [a.text() for a in size.actions() if a.isChecked()]
     assert checked == ["小"]
+
+
+def test_wave_timer_runs_only_while_someone_talks(win):
+    """音浪定时器有人朗读才开表——没人说话时不该每 180ms 醒一次。"""
+    assert not win._wave_timer.isActive()
+    win.set_run_state("fad", "busy")
+    win.set_speaking("fad", True)
+    assert win._wave_timer.isActive()
+    win.set_speaking("fad", False)
+    assert not win._wave_timer.isActive()

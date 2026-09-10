@@ -27,6 +27,7 @@ from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 # 「成员多了看不过来」——真正要的是把不常用的单独缩小。
 SEAT_SCALES = (("标准", 1.0), ("小", 0.7), ("更小", 0.5))
 SAVE_DEBOUNCE_MS = 400
+WAVE_MS = 180            # 音浪一帧;只在有人朗读时才转,没人说话就停表
 
 
 def _session_label(s) -> str:
@@ -107,6 +108,9 @@ class OfficeWindow(QMainWindow):
         self._save_timer.setInterval(SAVE_DEBOUNCE_MS)
         self._save_timer.timeout.connect(self.save_layout)
         self._blink_on = True
+        self._wave_timer = QTimer(self)      # 音浪:朗读时才跑,免得白烧 CPU
+        self._wave_timer.setInterval(WAVE_MS)
+        self._wave_timer.timeout.connect(self._tick_wave)
         self._extra_depts: set[str] = set()   # 用户手工建的地毯(可能还没人)
         self._always_on_top = False      # 与 set_always_on_top 的「值没变就不动」对齐
         self._framed = False             # 镜头是否已对准过办公室(只在首次装配时对)
@@ -252,6 +256,19 @@ class OfficeWindow(QMainWindow):
         seat = self.seats.get(name)
         if seat is not None:
             seat.set_speaking(on)
+        self._sync_wave_timer()
+
+    def _sync_wave_timer(self) -> None:
+        """有人在朗读才开表:没人说话的时候不该每 180ms 醒一次。"""
+        talking = any(s._speaking and s.is_up() for s in self.seats.values())
+        if talking and not self._wave_timer.isActive():
+            self._wave_timer.start()
+        elif not talking and self._wave_timer.isActive():
+            self._wave_timer.stop()
+
+    def _tick_wave(self) -> None:
+        for seat in self.seats.values():
+            seat.advance_wave()
 
     def set_title(self, name: str, text: str) -> None:
         seat = self.seats.get(name)

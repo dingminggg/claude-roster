@@ -137,10 +137,10 @@ def test_press_speaker_emits_only_while_speaking(app, seat):
     got = []
     seat.speaker_clicked.connect(got.append)
     seat.set_run_state("busy")
-    _press(seat, 180, 8)                # 没在朗读:喇叭不存在,当点工位
+    _press(seat, 40, 44)                # 没在朗读:音响只是摆设,当点工位
     assert got == []
     seat.set_speaking(True)
-    _press(seat, 180, 8)
+    _press(seat, 40, 44)
     assert got == ["fad"]
 
 
@@ -195,9 +195,10 @@ def test_hit_regions_are_semantic(app, seat):
     seat.set_run_state("busy")
     assert seat.hit(QPointF(100, 100)) == "person"   # 椅子上的人
     assert seat.hit(QPointF(40, 150)) == "seat"      # 桌腿旁边的空地
-    assert seat.hit(QPointF(180, 8)) == "seat"       # 没在朗读,喇叭不存在
+    at_speaker = QPointF(40, 44)                     # 桌上那个小音响
+    assert seat.hit(at_speaker) == "seat"            # 没在朗读:它只是个摆设
     seat.set_speaking(True)
-    assert seat.hit(QPointF(180, 8)) == "speaker"
+    assert seat.hit(at_speaker) == "speaker"
 
 
 def test_files_only_exist_when_there_are_sessions(app, seat):
@@ -223,3 +224,15 @@ def test_right_click_does_not_maximize(app, seat):
     ev.setButton(_Qt.MouseButton.RightButton)
     seat.mousePressEvent(ev)
     assert got == []
+
+
+def test_wave_only_animates_while_speaking(app, seat):
+    """音浪只在朗读时走帧;没在说话就别让它空转(那是每 180ms 一次重绘)。"""
+    seat.set_run_state("busy")
+    seat.advance_wave()
+    assert seat._wave == 0
+    seat.set_speaking(True)
+    seat.advance_wave()
+    assert seat._wave == 1
+    seat.set_speaking(False)
+    assert seat._wave == 0              # 停了就归位,下次从头跳
