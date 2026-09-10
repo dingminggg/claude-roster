@@ -414,6 +414,24 @@ def main() -> int:
 
     panel.dept_changed.connect(on_dept_changed)
 
+    def on_stop(name: str) -> None:
+        """「下班」:关掉该成员的控制台。关窗口不可逆(那边可能正干着活),
+        所以问一句再关;走 WM_CLOSE 等同点窗口的 ×,让 claude 有机会落盘 transcript。
+        句柄留在缓存里不动——窗口没了 IsWindow 自然为假,状态回到「未上班」。"""
+        m = by_name.get(name)
+        h = _live_hwnd(name)
+        if m is None or h is None:
+            return
+        if QMessageBox.question(
+                panel, "下班",
+                f"关掉 {name} 的控制台?\n它正在跑的活会中断(会话记录仍然保留,之后可以接着开)。",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        winman.close_window(h)
+        _refresh_states()
+
+    panel.stop_requested.connect(on_stop)
+
     def tick() -> None:
         # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄
         dead = [n for n, h in hwnds.items() if not winman.is_window(h)]

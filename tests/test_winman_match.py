@@ -27,3 +27,25 @@ def test_needle_absent():
 def test_dedupe_keeps_first_owner_of_shared_hwnd():
     # 同一句柄被两个成员缓存时,只认最早写入的那个(后来者是误抓)
     assert dedupe({"fad-3": 263952, "fad": 263952, "x": 1}) == {"fad-3": 263952, "x": 1}
+
+
+def test_close_window_posts_wm_close_and_swallows_errors(monkeypatch):
+    """「下班」发 WM_CLOSE(等同点 × ),不是强杀——claude 得有机会把
+    transcript 落盘,否则 --resume 就回不来了。"""
+    from claude_cockpit import winman
+    sent = []
+
+    class _FakeUser32:
+        def PostMessageW(self, hwnd, msg, w, l):
+            sent.append((hwnd, msg))
+
+    monkeypatch.setattr(winman, "user32", _FakeUser32())
+    winman.close_window(1234)
+    assert sent == [(1234, winman.WM_CLOSE)]
+
+    class _Boom:
+        def PostMessageW(self, *a):
+            raise OSError("nope")
+
+    monkeypatch.setattr(winman, "user32", _Boom())
+    winman.close_window(1234)          # 不许抛

@@ -24,7 +24,7 @@ from ..layout import SEAT_H, SEAT_W
 from .theme import (
     BEZEL, CHAIR, CHAIR_DARK, DESK_FRONT, DESK_FRONT_OFF, DESK_LEG, DESK_TOP,
     DESK_TOP_OFF, DIM, HEAD, MUG, NO_BG, NO_FG, OFF_OPACITY, SCREEN_OFF,
-    SHADOW, SHADOW_HARD, TXT, YES_BG, YES_FG,
+    PAPER, PAPER_LINE, SHADOW, SHADOW_HARD, TXT, YES_BG, YES_FG,
 )
 
 
@@ -84,6 +84,7 @@ class SeatItem(QGraphicsObject):
         self._speaking = False
         self._title = ""
         self._sub = "新会话"
+        self._papers = 0                # 桌上那叠文件的张数 = 历史会话条数
         self._hover = False
         self._press_pos = None          # 按下时的位置,用来判断松手时是否真挪过
         # 只要可拖,**不要 ItemIsSelectable**:Qt 拖一个图元时会把所有「选中的」
@@ -118,6 +119,13 @@ class SeatItem(QGraphicsObject):
         self._title = text or ""
         self.update()
 
+    def set_session_count(self, n: int) -> None:
+        """桌上那叠文件 = 这个成员的历史会话。右键点它出会话列表。"""
+        n = max(0, int(n))
+        if n != self._papers:
+            self._papers = n
+            self.update()
+
     def set_subtitle(self, text: str) -> None:
         """未运行时显示的「上次会话 / 新会话」。"""
         self._sub = text or "新会话"
@@ -140,14 +148,26 @@ class SeatItem(QGraphicsObject):
     def r_speaker(self) -> QRectF:
         return QRectF(172, 0, 22, 16)
 
-    def hit(self, pos: QPointF) -> str:
-        """局部坐标 → "speaker" / "seat"。
+    def r_person(self) -> QRectF:
+        """人和椅子那一块:右键它 = 对这个人下命令(上班 / 下班)。"""
+        return QRectF(74, 66, 54, 74)
 
-        工位上只剩这一个可点的小东西(朗读中的喇叭);启动、选会话那些操作
-        全在右键菜单里,所以别的地方一律当「点工位」。
+    def r_files(self) -> QRectF:
+        """桌上那叠文件:一张纸 = 一条历史会话,右键它挑会话。"""
+        return QRectF(130, 30, 40, 28)
+
+    def hit(self, pos: QPointF) -> str:
+        """局部坐标 → "speaker" / "person" / "files" / "seat"。
+
+        分区是有语义的:点人 = 管他上下班,点文件 = 管他的会话历史。
+        paint 和这里共用同一份 r_*,两处各写一遍必然漂移。
         """
         if self.is_up() and self._speaking and self.r_speaker().contains(pos):
             return "speaker"
+        if self.r_person().contains(pos):
+            return "person"
+        if self._papers and self.r_files().contains(pos):
+            return "files"
         return "seat"
 
     # ---------- 绘制 ----------
@@ -199,7 +219,21 @@ class SeatItem(QGraphicsObject):
         p.drawRect(QRectF(84, 44, 10, 4))                   # 支架
         p.drawRoundedRect(QRectF(78, 47, 22, 3), 1.5, 1.5)  # 底座
         p.setBrush(QBrush(MUG))
-        p.drawRoundedRect(QRectF(140, 42, 12, 12), 3, 3)    # 杯子,桌面别空着
+        p.drawRoundedRect(QRectF(124, 44, 11, 11), 3, 3)    # 杯子
+
+        # 桌上一叠文件:一张纸 = 一条历史会话(最多画 3 张,再多就摞不出层次了)
+        if self._papers:
+            for i in range(min(3, self._papers)):
+                off = i * 3
+                p.setBrush(QBrush(SHADOW))
+                p.drawRoundedRect(QRectF(137 - off, 35 - off + 2, 28, 20), 2, 2)
+                p.setBrush(QBrush(PAPER))
+                p.drawRoundedRect(QRectF(136 - off, 34 - off, 28, 20), 2, 2)
+            p.setBrush(QBrush(PAPER_LINE))          # 最上面那张画两条「字」
+            p.drawRect(QRectF(140 - (min(3, self._papers) - 1) * 3,
+                              38 - (min(3, self._papers) - 1) * 3, 16, 1.5))
+            p.drawRect(QRectF(140 - (min(3, self._papers) - 1) * 3,
+                              42 - (min(3, self._papers) - 1) * 3, 11, 1.5))
 
         # 椅子和人:在桌子**前面**(下方),我们看到的是后脑勺和椅背
         p.setBrush(QBrush(SHADOW))

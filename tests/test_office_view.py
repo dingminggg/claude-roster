@@ -78,7 +78,6 @@ def test_seat_click_is_forwarded_as_member_clicked(win):
 
 
 
-
 def test_menu_copy_address_disabled_not_hidden(win):
     """探不到会话地址时该项置灰而不是隐藏——隐藏用户会以为功能没了。"""
     menu = win.build_menu("fad")
@@ -218,7 +217,6 @@ def test_session_row_shows_title_and_untitled_fallback(win):
 
 
 
-
 def test_refit_scene_keeps_camera_put(win, app):
     """拖完工位 400ms 后存盘会顺带 refit。只要内容还装得下,镜头就不许自己跳
     (装不下才缩回去,那是另一个测试的事)。"""
@@ -244,48 +242,13 @@ def _menu_items(menu):
     return [a.text() for a in menu.actions()]
 
 
-def test_menu_of_down_seat_can_start_new_session(win):
-    """没上班的工位:菜单第一档就是启动,点「新会话」传 None。"""
-    win.set_run_state("fad", "down")
-    got = []
-    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
-    menu = win.build_menu("fad")
-    act = next(a for a in menu.actions() if "启动(新会话)" in a.text())
-    act.trigger()
-    assert got == [("fad", None)]
 
 
-def test_menu_of_down_seat_lists_sessions_to_resume(win):
-    """有历史会话时多一个「续接会话」子菜单,点某条就带它的 id 启动。"""
-    win.set_run_state("fad", "down")
-    win.set_sessions("fad", [Session(id="s-new", title="新的那条", mtime=2.0),
-                             Session(id="s-old", title="旧的那条", mtime=1.0)])
-    got = []
-    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
-    menu = win.build_menu("fad")     # 父菜单要留个引用:被回收会连带删掉子菜单
-    sub = next(a.menu() for a in menu.actions() if a.text() == "续接会话")
-    assert [a.text() for a in sub.actions()] == ["新的那条", "旧的那条"]
-    sub.actions()[1].trigger()
-    assert got == [("fad", "s-old")]
 
 
-def test_menu_can_delete_a_session_record(win):
-    win.set_run_state("fad", "down")
-    win.set_sessions("fad", [Session(id="s1", title="要删的", mtime=1.0)])
-    got = []
-    win.delete_session_requested.connect(lambda n, sid: got.append((n, sid)))
-    menu = win.build_menu("fad")     # 同上:父菜单不留引用,子菜单会被一起回收
-    sub = next(a.menu() for a in menu.actions() if a.text() == "删除会话记录")
-    sub.actions()[0].trigger()
-    assert got == [("fad", "s1")]
 
 
-def test_menu_of_running_seat_has_no_start(win):
-    """已经在跑的成员不该再出现启动项——重复启动是历史 bug 的来源。"""
-    win.set_run_state("fad", "busy")
-    texts = _menu_items(win.build_menu("fad"))
-    assert not any("启动" in t for t in texts)
-    assert "复制会话地址" in texts and "打开目录" in texts
+
 
 
 def test_drag_seat_into_another_area_changes_dept(win):
@@ -367,3 +330,78 @@ def test_content_growing_out_of_view_gets_refit(win, app):
     # 注意:fit_scale 有 0.35 的下限——内容大到那个程度时,宁可看不全也不缩成蚂蚁
     from claude_cockpit.office.view import ZOOM_MIN
     assert win.zoom >= ZOOM_MIN
+
+
+def test_person_menu_clocks_in_and_out(win):
+    """右键人:没上班给「上班」,上班了给「下班」——点谁就是对谁下命令。"""
+    started, stopped = [], []
+    win.start_requested.connect(lambda n, sid: started.append((n, sid)))
+    win.stop_requested.connect(stopped.append)
+
+    win.set_run_state("fad", "down")
+    menu = win.build_menu("fad", "person")
+    texts = [a.text() for a in menu.actions()]
+    assert any(t.startswith("上班") for t in texts)
+    assert not any(t.startswith("下班") for t in texts)
+    next(a for a in menu.actions() if "新会话" in a.text()).trigger()
+    assert started == [("fad", None)]
+
+    win.set_run_state("fad", "busy")
+    menu2 = win.build_menu("fad", "person")
+    texts2 = [a.text() for a in menu2.actions()]
+    assert any(t.startswith("下班") for t in texts2)
+    assert not any(t.startswith("上班") for t in texts2)   # 在跑的不给再开一个
+    menu2.actions()[0].trigger()
+    assert stopped == ["fad"]
+
+
+def test_person_menu_can_resume_last_session(win):
+    win.set_run_state("fad", "down")
+    win.set_sessions("fad", [Session(id="s-new", title="最近那条", mtime=2.0),
+                             Session(id="s-old", title="更早那条", mtime=1.0)])
+    got = []
+    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
+    menu = win.build_menu("fad", "person")
+    next(a for a in menu.actions() if "上次" in a.text()).trigger()
+    assert got == [("fad", "s-new")]
+
+
+def test_files_menu_lists_sessions(win):
+    """右键桌上那叠文件 = 会话历史:能接着某条继续,也能删掉某条记录。"""
+    win.set_run_state("fad", "down")
+    win.set_sessions("fad", [Session(id="s1", title="第一条", mtime=2.0),
+                             Session(id="s2", title="第二条", mtime=1.0)])
+    started, deleted = [], []
+    win.start_requested.connect(lambda n, sid: started.append((n, sid)))
+    win.delete_session_requested.connect(lambda n, sid: deleted.append((n, sid)))
+
+    menu = win.build_menu("fad", "files")
+    resume = next(a.menu() for a in menu.actions() if a.text() == "接着这条继续")
+    assert [a.text() for a in resume.actions()] == ["第一条", "第二条"]
+    resume.actions()[1].trigger()
+    assert started == [("fad", "s2")]
+
+    rm = next(a.menu() for a in menu.actions() if a.text() == "删除这条记录")
+    rm.actions()[0].trigger()
+    assert deleted == [("fad", "s1")]
+
+
+def test_files_menu_of_running_seat_cannot_start_another(win):
+    """已经在跑的成员:文件菜单里只剩「删除记录」,没有「接着继续」——防重复启动。"""
+    win.set_sessions("fad", [Session(id="s1", title="第一条", mtime=1.0)])
+    win.set_run_state("fad", "busy")
+    texts = [a.text() for a in win.build_menu("fad", "files").actions()]
+    assert texts == ["删除这条记录"]
+
+
+def test_seat_menu_is_about_the_member(win):
+    texts = [a.text() for a in win.build_menu("fad", "seat").actions()]
+    assert texts == ["复制会话地址", "打开目录", "编辑", "删除"]
+
+
+def test_file_stack_follows_session_count(win):
+    win.set_sessions("fad", [Session(id="s1", title="a", mtime=1.0),
+                             Session(id="s2", title="b", mtime=2.0)])
+    assert win.seats["fad"]._papers == 2
+    win.set_sessions("fad", [])
+    assert win.seats["fad"]._papers == 0

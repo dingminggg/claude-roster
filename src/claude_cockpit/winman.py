@@ -156,3 +156,19 @@ def minimize(hwnd: int) -> None:
         user32.ShowWindow(hwnd, SW_MINIMIZE)
     except Exception:
         pass
+
+
+WM_CLOSE = 0x0010
+
+
+def close_window(hwnd: int) -> None:
+    """请求关掉这个控制台窗口(「下班」)。
+
+    发 WM_CLOSE 而不是杀进程:等同于用户点窗口右上角的 ×,cmd 会正常收尾,
+    claude 也有机会把 transcript 落盘(不落盘就 --resume 不回来了)。
+    关不掉(窗口没响应)就算了,别升级成强杀。
+    """
+    try:
+        user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+    except Exception:
+        pass

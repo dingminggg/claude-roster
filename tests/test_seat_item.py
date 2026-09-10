@@ -190,15 +190,25 @@ def test_left_click_still_works(app, seat):
     assert clicks == ["fad"]
 
 
-def test_hit_only_knows_speaker_and_seat(app, seat):
-    """工位上只剩朗读小喇叭可点:启动、选会话都搬到右键菜单了,
-    别处一律当「点工位」(否则拖动会被按钮吃掉)。"""
+def test_hit_regions_are_semantic(app, seat):
+    """命中区是有语义的:点人 = 管上下班,点文件 = 管会话历史,其余 = 点工位。"""
     seat.set_run_state("busy")
-    assert seat.hit(QPointF(100, 100)) == "seat"
-    assert seat.hit(QPointF(40, 150)) == "seat"     # 以前这儿是启动键
-    assert seat.hit(QPointF(180, 8)) == "seat"      # 没在朗读,喇叭不存在
+    assert seat.hit(QPointF(100, 100)) == "person"   # 椅子上的人
+    assert seat.hit(QPointF(40, 150)) == "seat"      # 桌腿旁边的空地
+    assert seat.hit(QPointF(180, 8)) == "seat"       # 没在朗读,喇叭不存在
     seat.set_speaking(True)
     assert seat.hit(QPointF(180, 8)) == "speaker"
+
+
+def test_files_only_exist_when_there_are_sessions(app, seat):
+    """没有历史会话就没有那叠文件,那块地方当普通桌面。"""
+    seat.set_run_state("down")
+    at_files = QPointF(150, 44)
+    assert seat.hit(at_files) == "seat"
+    seat.set_session_count(3)
+    assert seat.hit(at_files) == "files"
+    seat.set_session_count(0)
+    assert seat.hit(at_files) == "seat"
 
 
 def test_right_click_does_not_maximize(app, seat):

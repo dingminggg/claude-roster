@@ -96,6 +96,7 @@ class OfficeWindow(QMainWindow):
     copy_address_requested = Signal(str)
     delete_session_requested = Signal(str, str)
     dept_changed = Signal(str, str)      # (成员名, 新部门):拖进哪块地毯就归哪个部门
+    stop_requested = Signal(str)         # 「下班」:关掉那个成员的控制台
 
     def __init__(self, members):
         super().__init__()
@@ -304,6 +305,7 @@ class OfficeWindow(QMainWindow):
         self._sessions[name] = items
         seat = self.seats.get(name)
         if seat is not None:
+            seat.set_session_count(len(items))
             seat.set_subtitle(_session_label(items[0]) if items else "新会话")
 
     def set_address(self, name: str, addr: str | None) -> None:
@@ -332,40 +334,62 @@ class OfficeWindow(QMainWindow):
             seat.set_blink(self._blink_on)
 
     # ---------- 右键菜单 ----------
-    def build_menu(self, name: str) -> QMenu:
-        """工位的右键菜单。**所有操作都在这儿**——工位上不放按钮(那样画面才干净)。
+    def build_menu(self, name: str, where: str = "seat") -> QMenu:
+        """工位的右键菜单。**按落点分发**——点谁就是对谁下命令:
+
+            person → 上班 / 下班          files → 会话历史(续接 / 删除)
+            其余   → 这个成员本身(地址 / 目录 / 编辑 / 删除)
 
         单独成方法(不在 contextMenuEvent 里现搭):exec 阻塞,不抽出来没法单测。
         """
+        if where == "person":
+            return self._menu_person(name)
+        if where == "files":
+            return self._menu_files(name)
+        return self._menu_member(name)
+
+    def _menu_person(self, name: str) -> QMenu:
+        """点人:管他上下班。"""
         menu = QMenu(self)
         seat = self.seats.get(name)
-        sessions = self._sessions.get(name) or []
-
-        if seat is not None and not seat.is_up():
-            # 没上班:菜单第一档就是启动。选哪条会话由子菜单点明,
-            # 「点一下就开」本身已经是个明确动作,不再另做内联确认。
-            menu.addAction("启动(新会话)").triggered.connect(
+        up = seat is not None and seat.is_up()
+        if up:
+            menu.addAction("下班(关掉控制台)").triggered.connect(
+                lambda: self.stop_requested.emit(name))
+        else:
+            menu.addAction("上班(新会话)").triggered.connect(
                 lambda: self.start_requested.emit(name, None))
-            if sessions:
-                # 子菜单显式建、显式挂在父菜单上:用 menu.addMenu("标题") 的话
-                # 返回的 QMenu 在 Python 侧没人持有,会被回收掉(C++ 侧就没了)
-                sub = QMenu("续接会话", menu)
-                for sess in sessions:
-                    act = sub.addAction(_session_label(sess))
-                    act.triggered.connect(
-                        lambda _=False, sid=sess.id:
-                        self.start_requested.emit(name, sid))
-                menu.addMenu(sub)
-                rm = QMenu("删除会话记录", menu)
-                for sess in sessions:
-                    act = rm.addAction(_session_label(sess))
-                    act.triggered.connect(
-                        lambda _=False, sid=sess.id:
-                        self.delete_session_requested.emit(name, sid))
-                menu.addMenu(rm)
-                menu._submenus = (sub, rm)      # 防回收
-            menu.addSeparator()
+            if self._sessions.get(name):
+                menu.addAction("上班(接着上次那条)").triggered.connect(
+                    lambda: self.start_requested.emit(
+                        name, self._sessions[name][0].id))
+        return menu
 
+    def _menu_files(self, name: str) -> QMenu:
+        """点桌上那叠文件:一张纸 = 一条历史会话。"""
+        menu = QMenu(self)
+        seat = self.seats.get(name)
+        up = seat is not None and seat.is_up()
+        subs = []
+        for title, sink in (("接着这条继续",
+                             lambda sid: self.start_requested.emit(name, sid)),
+                            ("删除这条记录",
+                             lambda sid: self.delete_session_requested.emit(name, sid))):
+            if title.startswith("接着") and up:
+                continue        # 已经在跑的成员不给「再开一个」,防重复启动
+            sub = QMenu(title, menu)
+            for sess in self._sessions.get(name) or []:
+                act = sub.addAction(_session_label(sess))
+                act.triggered.connect(
+                    lambda _=False, sid=sess.id, f=sink: f(sid))
+            menu.addMenu(sub)
+            subs.append(sub)
+        menu._submenus = tuple(subs)     # 防回收:子菜单在 Python 侧得有人持有
+        return menu
+
+    def _menu_member(self, name: str) -> QMenu:
+        """点工位其余地方:这个成员本身的事。"""
+        menu = QMenu(self)
         addr = self._addrs.get(name)
         copy = menu.addAction("复制会话地址")
         if addr:
@@ -424,7 +448,8 @@ class OfficeWindow(QMainWindow):
         while item is not None and not isinstance(item, SeatItem):
             item = item.parentItem()
         if isinstance(item, SeatItem):
-            self.build_menu(item.name).exec(e.globalPos())
+            where = item.hit(item.mapFromScene(self._canvas.mapToScene(in_canvas)))
+            self.build_menu(item.name, where).exec(e.globalPos())
             return
         scene_pos = self._canvas.mapToScene(in_canvas)
         area = next((n for n, a in self.areas.items()
