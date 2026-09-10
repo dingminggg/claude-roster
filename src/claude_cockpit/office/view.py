@@ -14,7 +14,7 @@ from __future__ import annotations
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QGraphicsScene, QGraphicsView, QMainWindow, QMenu,
+    QGraphicsScene, QGraphicsView, QInputDialog, QMainWindow, QMenu,
 )
 
 from .. import layout as layout_mod
@@ -94,6 +94,7 @@ class OfficeWindow(QMainWindow):
     open_dir_requested = Signal(str)
     copy_address_requested = Signal(str)
     delete_session_requested = Signal(str, str)
+    dept_changed = Signal(str, str)      # (成员名, 新部门):拖进哪块地毯就归哪个部门
 
     def __init__(self, members):
         super().__init__()
@@ -111,6 +112,7 @@ class OfficeWindow(QMainWindow):
         self._save_timer.setInterval(SAVE_DEBOUNCE_MS)
         self._save_timer.timeout.connect(self.save_layout)
         self._blink_on = True
+        self._extra_depts: set[str] = set()   # 用户手工建的地毯(可能还没人)
         self._always_on_top = False      # 与 set_always_on_top 的「值没变就不动」对齐
         self._framed = False             # 镜头是否已对准过办公室(只在首次装配时对)
         self.rebuild(members)
@@ -127,7 +129,10 @@ class OfficeWindow(QMainWindow):
         self._sessions = {k: v for k, v in self._sessions.items() if k in live}
         self._addrs = {k: v for k, v in self._addrs.items() if k in live}
         raw = settings.load().get("office") or {}
-        lay = layout_mod.ensure(layout_mod.parse(raw), self._members)
+        parsed = layout_mod.parse(raw)
+        self._extra_depts |= {d for d in parsed.depts}
+        parsed.depts = sorted(self._extra_depts | set(parsed.depts))
+        lay = layout_mod.ensure(parsed, self._members)
         self._lay = lay
         for dept, (x, y, w, h) in lay.areas.items():
             area = DeptAreaItem(dept, w, h)
@@ -143,7 +148,7 @@ class OfficeWindow(QMainWindow):
             seat.setPos(sx, sy)
             seat.clicked.connect(self.member_clicked.emit)
             seat.speaker_clicked.connect(self.stop_speaking_requested.emit)
-            seat.moved.connect(lambda _n: self._queue_save())
+            seat.moved.connect(self._on_seat_dropped)
             self.seats[m.name] = seat
         self._apply_zoom(lay.zoom)
         self.refit_scene()
@@ -153,6 +158,75 @@ class OfficeWindow(QMainWindow):
             self.resize(*lay.window)
             self.focus_content()
             self._framed = True
+
+    def _area_at(self, seat) -> str | None:
+        """工位中心落在哪块地毯上。压着两块边界时取 z 值最上面的那块。"""
+        center = seat.mapToScene(seat.boundingRect().center())
+        hits = [n for n, a in self.areas.items()
+                if a.sceneBoundingRect().contains(center)]
+        return hits[-1] if hits else None
+
+    def _on_seat_dropped(self, name: str) -> None:
+        """拖完工位:落在别的地毯上就换部门(真相写回 agents.yaml,由 main 负责)。"""
+        seat = self.seats.get(name)
+        if seat is not None:
+            landed = self._area_at(seat)
+            here = seat.parentItem()
+            if landed and self.areas.get(landed) is not here:
+                area = self.areas[landed]
+                scene_pos = seat.scenePos()
+                seat.setParentItem(area)                 # 换爸爸,位置保持不动
+                seat.setPos(area.mapFromScene(scene_pos))
+                self.dept_changed.emit(name, landed)
+        self._queue_save()
+
+    def add_area(self, name: str, at=None) -> None:
+        """新建一块部门地毯。人还没拖进来时它是空的——空地毯要能存住,
+        否则「先建区、再拖人」的第一步就没了(layout.depts 记这份名单)。"""
+        name = (name or "").strip()
+        if not name or name in self.areas:
+            return
+        area = DeptAreaItem(name, *layout_mod.AREA_DEFAULT)
+        if at is None:
+            r = self.scene.itemsBoundingRect()
+            at = (r.left(), r.bottom() + layout_mod.GAP)
+        area.setPos(*at)
+        area.changed.connect(lambda _n: self._queue_save())
+        self.scene.addItem(area)
+        self.areas[name] = area
+        self._extra_depts.add(name)
+        self.refit_scene()
+        self._queue_save()
+
+    def rename_area(self, old: str, new: str) -> None:
+        new = (new or "").strip()
+        if not new or new == old or new not in ("",) and new in self.areas:
+            return
+        area = self.areas.pop(old, None)
+        if area is None:
+            return
+        area.name = new
+        self.areas[new] = area
+        area.update()
+        if old in self._extra_depts:
+            self._extra_depts.discard(old)
+        self._extra_depts.add(new)
+        # 这块地毯上的人跟着改部门(写回 yaml 由 main 做)
+        for seat_name, seat in self.seats.items():
+            if seat.parentItem() is area:
+                self.dept_changed.emit(seat_name, new)
+        self._queue_save()
+
+    def remove_area(self, name: str) -> None:
+        """删掉一块空地毯。上面还有人就不动——人得先拖走,免得默默把谁的部门清了。"""
+        area = self.areas.get(name)
+        if area is None or any(s.parentItem() is area for s in self.seats.values()):
+            return
+        self.scene.removeItem(area)
+        self.areas.pop(name, None)
+        self._extra_depts.discard(name)
+        self.refit_scene()
+        self._queue_save()
 
     def refit_scene(self) -> None:
         """sceneRect 跟着内容长:否则把地毯拖到边界就走不动了,「无限画布」是假的。
@@ -290,6 +364,40 @@ class OfficeWindow(QMainWindow):
             lambda: self.delete_requested.emit(name))
         return menu
 
+    def build_canvas_menu(self, area: str | None, scene_pos=None) -> QMenu:
+        """画布上的右键菜单:空白处能新建部门;点在地毯上还能改名 / 删掉。
+
+        和 build_menu 一样单独成方法——exec 阻塞,不抽出来没法单测。
+        """
+        menu = QMenu(self)
+        menu.addAction("新增成员").triggered.connect(self.add_requested.emit)
+        at = (scene_pos.x(), scene_pos.y()) if scene_pos is not None else None
+        menu.addAction("新建部门区域").triggered.connect(
+            lambda: self._ask_new_area(at))
+        if area:
+            menu.addSeparator()
+            menu.addAction(f"重命名「{area}」").triggered.connect(
+                lambda: self._ask_rename_area(area))
+            occupied = any(s.parentItem() is self.areas.get(area)
+                           for s in self.seats.values())
+            rm = menu.addAction(f"删除「{area}」")
+            if occupied:
+                rm.setEnabled(False)
+                rm.setToolTip("这块地毯上还有人:先把工位拖到别的部门再删")
+            else:
+                rm.triggered.connect(lambda: self.remove_area(area))
+        return menu
+
+    def _ask_new_area(self, at=None) -> None:
+        name, ok = QInputDialog.getText(self, "新建部门区域", "部门名")
+        if ok:
+            self.add_area(name, at)
+
+    def _ask_rename_area(self, old: str) -> None:
+        name, ok = QInputDialog.getText(self, "重命名部门", "新的部门名", text=old)
+        if ok:
+            self.rename_area(old, name)
+
     def contextMenuEvent(self, e):
         # e.pos() 是窗口坐标,先落到画布再落到场景(直接用会偏一个画布偏移)
         in_canvas = self._canvas.mapFromGlobal(e.globalPos())
@@ -300,9 +408,10 @@ class OfficeWindow(QMainWindow):
         if isinstance(item, SeatItem):
             self.build_menu(item.name).exec(e.globalPos())
             return
-        menu = QMenu(self)
-        menu.addAction("新增成员").triggered.connect(self.add_requested.emit)
-        menu.exec(e.globalPos())
+        scene_pos = self._canvas.mapToScene(in_canvas)
+        area = next((n for n, a in self.areas.items()
+                     if a.sceneBoundingRect().contains(scene_pos)), None)
+        self.build_canvas_menu(area, scene_pos).exec(e.globalPos())
 
     # ---------- 内部 ----------
     def _zoom_by(self, factor: float) -> None:
@@ -321,6 +430,7 @@ class OfficeWindow(QMainWindow):
         lay = layout_mod.Layout(
             areas={n: a.geometry() for n, a in self.areas.items()},
             seats={n: (s.pos().x(), s.pos().y()) for n, s in self.seats.items()},
+            depts=sorted(self.areas),
             window=(self.width(), self.height()),
             zoom=self.zoom,
         )

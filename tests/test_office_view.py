@@ -285,3 +285,54 @@ def test_menu_of_running_seat_has_no_start(win):
     texts = _menu_items(win.build_menu("fad"))
     assert not any("启动" in t for t in texts)
     assert "复制会话地址" in texts and "打开目录" in texts
+
+
+def test_drag_seat_into_another_area_changes_dept(win):
+    """把工位拖到别的地毯上 → 换部门,并报出去让 main 写回 agents.yaml。"""
+    from claude_cockpit.layout import UNASSIGNED
+    got = []
+    win.dept_changed.connect(lambda n, d: got.append((n, d)))
+    seat, target = win.seats["fad"], win.areas[UNASSIGNED]
+    seat.setParentItem(seat.parentItem())          # 先确认它本来在后端组
+    assert win.seats["fad"].parentItem() is win.areas["后端组"]
+
+    seat.setPos(seat.pos())                        # 挪到「未分配」那块地毯中央
+    seat.setParentItem(win.scene.items() and seat.parentItem())
+    center = target.sceneBoundingRect().center()
+    seat.setParentItem(target.parentItem() or None)
+    win.scene.addItem(seat) if seat.scene() is None else None
+    seat.setPos(center.x() - 100, center.y() - 80)
+    win._on_seat_dropped("fad")
+
+    assert got == [("fad", UNASSIGNED)]
+    assert win.seats["fad"].parentItem() is target
+
+
+def test_new_area_can_be_created_and_removed(win):
+    win.add_area("新组", at=(2000, 2000))
+    assert "新组" in win.areas
+    win.remove_area("新组")
+    assert "新组" not in win.areas
+
+
+def test_area_with_people_cannot_be_removed(win):
+    """地毯上还有人就不许删——免得默默把谁的部门清了。"""
+    win.remove_area("后端组")
+    assert "后端组" in win.areas
+    menu = win.build_canvas_menu("后端组")
+    rm = next(a for a in menu.actions() if a.text().startswith("删除"))
+    assert not rm.isEnabled() and rm.toolTip()
+
+
+def test_rename_area_moves_its_people(win):
+    got = []
+    win.dept_changed.connect(lambda n, d: got.append((n, d)))
+    win.rename_area("后端组", "服务端组")
+    assert "服务端组" in win.areas and "后端组" not in win.areas
+    assert set(got) == {("fad", "服务端组"), ("fad-2", "服务端组")}
+
+
+def test_canvas_menu_on_blank_offers_new_area(win):
+    texts = [a.text() for a in win.build_canvas_menu(None).actions()]
+    assert "新增成员" in texts and "新建部门区域" in texts
+    assert not any(t.startswith("删除") for t in texts)

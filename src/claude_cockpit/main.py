@@ -397,6 +397,23 @@ def main() -> int:
     panel.copy_address_requested.connect(on_copy_address)
     panel.delete_session_requested.connect(on_delete_session)
 
+    def on_dept_changed(name: str, dept: str) -> None:
+        """工位被拖进了别的部门地毯 → 写回 agents.yaml。
+
+        只改 dept 一个字段、**不重建画布**:重建会按布局重新落座,把用户刚拖到的
+        位置冲掉。写盘失败就静默(下次拖动还会再写),别为这个弹框打断人。
+        """
+        m = by_name.get(name)
+        if m is None or m.dept == dept:
+            return
+        m.dept = dept
+        try:
+            save_config(cfg_path, members)
+        except Exception:
+            pass
+
+    panel.dept_changed.connect(on_dept_changed)
+
     def tick() -> None:
         # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄
         dead = [n for n, h in hwnds.items() if not winman.is_window(h)]

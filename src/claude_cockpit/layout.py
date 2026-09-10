@@ -27,6 +27,10 @@ UNASSIGNED = "未分配"           # 没填 dept 的成员归到这块地毯
 class Layout:
     areas: dict[str, tuple[float, float, float, float]] = field(default_factory=dict)
     seats: dict[str, tuple[float, float]] = field(default_factory=dict)
+    # 用户手工建出来的部门(可能还一个人都没有)。不记这份名单的话,
+    # 「先建好空地毯、再把人拖进去」这个流程第一步就没了——ensure 会把没人的
+    # 地毯当残留清掉。
+    depts: list[str] = field(default_factory=list)
     window: tuple[int, int] = DEFAULT_WINDOW
     zoom: float = 1.0
 
@@ -65,11 +69,13 @@ def parse(raw) -> Layout:
         got = _nums(v, 2)
         if got:
             seats[str(k)] = got
+    depts = [str(d) for d in raw.get("depts") or [] if isinstance(d, str)]
     win = _nums(raw.get("window"), 2)
     zoom = raw.get("zoom")
     return Layout(
         areas=areas,
         seats=seats,
+        depts=depts,
         window=(int(win[0]), int(win[1])) if win else DEFAULT_WINDOW,
         zoom=float(zoom) if isinstance(zoom, (int, float))
         and not isinstance(zoom, bool) and 0.2 <= zoom <= 4 else 1.0,
@@ -81,6 +87,7 @@ def dump(lay: Layout) -> dict:
         "areas": {k: [_i(v[0]), _i(v[1]), _i(v[2]), _i(v[3])]
                   for k, v in lay.areas.items()},
         "seats": {k: [_i(v[0]), _i(v[1])] for k, v in lay.seats.items()},
+        "depts": list(lay.depts),
         "window": [int(lay.window[0]), int(lay.window[1])],
         "zoom": lay.zoom,
     }
@@ -121,6 +128,10 @@ def ensure(lay: Layout, members) -> Layout:
     已有的坐标一律保持原样——用户摆好的位置不许被程序挪动。
     """
     depts, by_dept = [], {}
+    for d in lay.depts:                 # 用户建的空部门也要有地毯
+        if d not in by_dept:
+            depts.append(d)
+            by_dept[d] = []
     for m in members:
         d = dept_of(m)
         if d not in by_dept:
@@ -158,7 +169,8 @@ def ensure(lay: Layout, members) -> Layout:
                 areas[d] = (x, y, w, h)
             seats[name] = spot
             taken.add(spot)
-    return Layout(areas=areas, seats=seats, window=lay.window, zoom=lay.zoom)
+    return Layout(areas=areas, seats=seats, depts=depts,
+                  window=lay.window, zoom=lay.zoom)
 
 
 def _grow_x(w: float) -> float:

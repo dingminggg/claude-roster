@@ -11,7 +11,7 @@ def _m(name, dept=""):
 
 def test_parse_roundtrip():
     raw = {"areas": {"后端组": [10, 30, 452, 216]}, "seats": {"fad": [18, 26]},
-           "window": [900, 620], "zoom": 1.5}
+           "depts": ["后端组"], "window": [900, 620], "zoom": 1.5}
     lay = layout.parse(raw)
     assert lay.areas["后端组"] == (10.0, 30.0, 452.0, 216.0)
     assert lay.seats["fad"] == (18.0, 26.0)
@@ -121,3 +121,18 @@ def test_single_member_area_keeps_minimum_width_and_fits_one_seat():
     sx, sy = lay.seats["solo"]
     assert sx + layout.SEAT_W <= w
     assert sy + layout.SEAT_H <= h
+
+
+def test_empty_dept_survives_because_user_made_it():
+    """用户先建一块空地毯、再把人拖进去——所以没人的部门不能被当残留清掉。"""
+    lay = layout.parse({"depts": ["新组"]})
+    lay = layout.ensure(lay, [_m("a", "后端组")])
+    assert "新组" in lay.areas
+    assert set(lay.depts) == {"新组", "后端组"}
+    assert layout.dump(lay)["depts"] == lay.depts
+
+
+def test_dept_list_survives_roundtrip():
+    lay = layout.parse(layout.dump(layout.ensure(
+        layout.parse({"depts": ["空组"]}), [_m("a", "后端组")])))
+    assert "空组" in lay.depts and "空组" in lay.areas
