@@ -19,7 +19,8 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from .theme import (
     CHAIR, CHAIR_SEAT, DESK, DESK_EDGE, DESK_EDGE_OFF, DESK_OFF, DIM, FLOOR,
-    FLOOR_HOVER, GEAR, HEAD, KEYS, MOUSE, NO_BG, NO_FG, OFF_OPACITY, OFF_TINT,
+    BEZEL, FLOOR_HOVER, HEAD, KEYS, LAPTOP, LAPTOP_EDGE, MOUSE, NO_BG,
+    NO_FG, OFF_OPACITY, OFF_TINT, SCREEN_OFF,
     PART, PART_SIDE, PART_TOP, PLANT, PLANT_OFF, PLANT_POT, SHADOW,
     SHADOW_SOFT, TXT, YES_BG, YES_FG, mix,
 )
@@ -226,35 +227,46 @@ class SeatItem(QGraphicsObject):
 
         # 屏幕光:从显示器往下(朝员工)洒在桌面上
         if up:
-            g = QLinearGradient(0, 26, 0, 58)
+            g = QLinearGradient(0, 36, 0, 60)
             c0 = QColor(glow); c0.setAlpha(230 if flash else 150)
             c1 = QColor(glow); c1.setAlpha(0)
             g.setColorAt(0.0, c0)
             g.setColorAt(1.0, c1)
             p.setBrush(QBrush(g))
             spill = QPainterPath()
-            spill.moveTo(30, 28)
-            spill.lineTo(62, 28)
-            spill.lineTo(74, 58)
-            spill.lineTo(18, 58)
+            spill.moveTo(28, 36)
+            spill.lineTo(72, 36)
+            spill.lineTo(84, 60)
+            spill.lineTo(16, 60)
             spill.closeSubpath()
             p.drawPath(spill)
 
-        # 显示器:俯视是背壳 + 支架,屏幕下沿漏一条光
+        # 笔记本电脑:屏幕朝观察者立起来一点(俯视里作弊透视),屏幕面 = 状态色;
+        # 下面连着机身键区。画成背面那个黑方块的话,根本认不出是电脑。
         p.setBrush(QBrush(SHADOW))
-        p.drawRoundedRect(QRectF(31, 21, 32, 12), 2, 2)
-        p.setBrush(QBrush(GEAR))
-        p.drawRoundedRect(QRectF(30, 18, 32, 12), 2, 2)
-        p.setBrush(QBrush(glow))
-        p.drawRect(QRectF(32, 29, 28, 3 if flash else 2))
-        p.setBrush(QBrush(GEAR))
-        p.drawRect(QRectF(44, 30, 4, 4))
-
-        # 键盘 + 鼠标:落在桌面上
+        p.drawRoundedRect(QRectF(27, 22, 48, 30), 3, 3)
+        # 屏幕:深色边框 + 里面一块亮屏
+        p.setBrush(QBrush(BEZEL))
+        p.drawRoundedRect(QRectF(26, 17, 48, 21), 3, 3)
+        p.setBrush(QBrush(glow if up else SCREEN_OFF))
+        p.drawRoundedRect(QRectF(29, 20, 42, 15), 2, 2)
+        if up:
+            # 屏幕上几行「代码」,让它更像在干活
+            p.setBrush(QBrush(QColor(255, 255, 255, 150)))
+            for i, wpx in enumerate((26, 18, 30)):
+                p.drawRect(QRectF(32, 23 + i * 4, wpx, 2))
+        # 转轴 + 机身键区(比屏幕略宽,压在桌面上)
+        p.setBrush(QBrush(LAPTOP_EDGE))
+        p.drawRoundedRect(QRectF(24, 37, 52, 4), 2, 2)
+        p.setBrush(QBrush(LAPTOP))
+        p.drawRoundedRect(QRectF(22, 40, 56, 14), 3, 3)
         p.setBrush(QBrush(KEYS))
-        p.drawRoundedRect(QRectF(28, 42, 34, 10), 2, 2)
+        p.drawRoundedRect(QRectF(27, 43, 46, 6), 1.5, 1.5)
+        p.setBrush(QBrush(LAPTOP_EDGE))
+        p.drawRoundedRect(QRectF(40, 50, 20, 3), 1.5, 1.5)     # 触控板
+        # 鼠标:机身右边
         p.setBrush(QBrush(MOUSE))
-        p.drawEllipse(QRectF(66, 43, 6, 8))
+        p.drawEllipse(QRectF(82, 42, 7, 10))
 
         # 成员名:直接刻在桌面右半边(不再套一张白工牌——身份已经由椅子靠背的
         # 成员配色带着了,再加一张浅色卡只是在浅底上多堆一层)

@@ -39,9 +39,14 @@ DESK = QColor("#d9bd94")        # 桌板:浅木色
 DESK_EDGE = QColor("#c3a375")   # 桌板前沿(看得见的那道板厚)
 DESK_OFF = QColor("#dcd8d1")    # 没人时的桌板:抽掉木色的暖调,一眼看出这位没上班
 DESK_EDGE_OFF = QColor("#c8c3ba")
-GEAR = QColor("#3b424c")        # 显示器背壳 / 支架:浅底上要够深才看得出是设备
-KEYS = QColor("#4a515b")        # 键盘
-MOUSE = QColor("#5b636e")
+# 笔记本:正俯视画显示器背面就是个黑方块,认不出是电脑。改画成笔记本,
+# 屏幕朝观察者立起来一点(俯视里作弊一下透视),屏幕面直接用状态色。
+BEZEL = QColor("#2f353d")       # 屏幕边框
+LAPTOP = QColor("#c5ccd6")      # 机身(银色)
+LAPTOP_EDGE = QColor("#aab2be")  # 机身边缘
+KEYS = QColor("#8f98a5")        # 键盘键区
+MOUSE = QColor("#98a1ae")
+SCREEN_OFF = QColor("#5b636e")  # 没开机时的屏幕
 CHAIR = QColor("#aab3c0")       # 扶手
 CHAIR_SEAT = QColor("#c3cbd6")  # 坐垫
 HEAD = QColor("#ffffff")        # 头顶底盘:白的,emoji 压在上面最清楚
