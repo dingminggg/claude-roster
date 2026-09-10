@@ -132,6 +132,26 @@ def _slots(w: float, h: float):
         y += SEAT_H + GAP
 
 
+def snap_to_slot(pos, area_wh, taken=()) -> tuple[float, float]:
+    """把拖到 pos 的工位咬到**最近的空槽位**(槽位就是自动布局用的那套行列)。
+
+    只吸附不代表限制自由:槽位是按 SEAT + GAP 铺的,拖到哪一格就归哪一格,
+    松手自动对齐;已经被别人占着的格子会跳过,所以工位不会叠在一起。
+    地毯太小一个槽位都没有 → 原样返回,别把工位甩到 (0,0)。
+    """
+    slots = list(_slots(*area_wh))
+    if not slots:
+        return (float(pos[0]), float(pos[1]))
+    busy = [(float(x), float(y)) for x, y in taken]
+
+    def occupied(slot):
+        return any(abs(slot[0] - bx) < 1 and abs(slot[1] - by) < 1
+                   for bx, by in busy)
+
+    free = [s for s in slots if not occupied(s)] or slots
+    return min(free, key=lambda s: (s[0] - pos[0]) ** 2 + (s[1] - pos[1]) ** 2)
+
+
 def ensure(lay: Layout, members) -> Layout:
     """补齐缺失的地毯和工位坐标,并丢掉已删成员/空部门的残留。
 

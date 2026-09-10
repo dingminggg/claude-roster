@@ -392,3 +392,30 @@ def test_wave_timer_runs_only_while_someone_talks(win):
     assert win._wave_timer.isActive()
     win.set_speaking("fad", False)
     assert not win._wave_timer.isActive()
+
+
+def test_dropping_a_seat_snaps_it_to_a_slot(win):
+    """松手自动对齐到槽位——拖的时候不用自己对得准。"""
+    from claude_cockpit.layout import AREA_PAD
+    seat = win.seats["fad"]
+    seat.setPos(AREA_PAD[0] + 9, AREA_PAD[1] + 7)     # 歪一点点
+    win._on_seat_dropped("fad")
+    assert (seat.pos().x(), seat.pos().y()) == AREA_PAD
+
+
+def test_snapping_never_stacks_two_seats(win):
+    """咬过去时别人占着的格子要跳过,不然两个工位叠一起。"""
+    a, b = win.seats["fad"], win.seats["fad-2"]
+    win._on_seat_dropped("fad")                       # a 先归位
+    b.setPos(a.pos().x() + 5, a.pos().y() + 5)        # b 拖到 a 头上
+    win._on_seat_dropped("fad-2")
+    assert (b.pos().x(), b.pos().y()) != (a.pos().x(), a.pos().y())
+
+
+def test_area_snaps_to_floor_tiles(win):
+    """地毯拖完咬到 60px 地砖:边缘歪在砖缝中间很难看。"""
+    from claude_cockpit.office.theme import TILE
+    area = win.areas["后端组"]
+    area.setPos(TILE * 3 + 17, TILE * 2 - 9)
+    win._on_area_changed("后端组")
+    assert area.pos().x() % TILE == 0 and area.pos().y() % TILE == 0

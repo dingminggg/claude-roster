@@ -21,6 +21,7 @@ from .. import layout as layout_mod
 from .. import settings
 from .dept_area import DeptAreaItem
 from .seat_item import SeatItem
+from . import theme
 from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 
 # 每个工位自己的大小档位。**整体缩放已经退休**:那是把所有人一起缩,等于没解决
@@ -136,7 +137,7 @@ class OfficeWindow(QMainWindow):
         for dept, (x, y, w, h) in lay.areas.items():
             area = DeptAreaItem(dept, w, h)
             area.setPos(x, y)
-            area.changed.connect(lambda _n: self._queue_save())
+            area.changed.connect(self._on_area_changed)
             self.scene.addItem(area)
             self.areas[dept] = area
         for m in self._members:
@@ -165,7 +166,8 @@ class OfficeWindow(QMainWindow):
         return hits[-1] if hits else None
 
     def _on_seat_dropped(self, name: str) -> None:
-        """拖完工位:落在别的地毯上就换部门(真相写回 agents.yaml,由 main 负责)。"""
+        """拖完工位:落在别的地毯上就换部门(写回 agents.yaml 由 main 负责),
+        然后**咬到最近的空槽位**——松手自动对齐,不用自己对得准。"""
         seat = self.seats.get(name)
         if seat is not None:
             landed = self._area_at(seat)
@@ -176,7 +178,28 @@ class OfficeWindow(QMainWindow):
                 seat.setParentItem(area)                 # 换爸爸,位置保持不动
                 seat.setPos(area.mapFromScene(scene_pos))
                 self.dept_changed.emit(name, landed)
+            self._snap(seat)
         self._queue_save()
+
+    def _on_area_changed(self, name: str) -> None:
+        """地毯拖完/拉伸完:位置咬到地砖网格,边缘就不会歪在砖缝中间。"""
+        area = self.areas.get(name)
+        if area is not None:
+            g = theme.TILE
+            area.setPos(round(area.pos().x() / g) * g,
+                        round(area.pos().y() / g) * g)
+        self._queue_save()
+
+    def _snap(self, seat) -> None:
+        """把工位咬到它所在地毯的最近空槽位(同地毯里别人占的格子跳过)。"""
+        area = seat.parentItem()
+        if not isinstance(area, DeptAreaItem):
+            return
+        taken = [(s.pos().x(), s.pos().y()) for s in self.seats.values()
+                 if s is not seat and s.parentItem() is area]
+        x, y = layout_mod.snap_to_slot((seat.pos().x(), seat.pos().y()),
+                                       (area.w, area.h), taken)
+        seat.setPos(x, y)
 
     def add_area(self, name: str, at=None) -> None:
         """新建一块部门地毯。人还没拖进来时它是空的——空地毯要能存住,
@@ -189,7 +212,7 @@ class OfficeWindow(QMainWindow):
             r = self.scene.itemsBoundingRect()
             at = (r.left(), r.bottom() + layout_mod.GAP)
         area.setPos(*at)
-        area.changed.connect(lambda _n: self._queue_save())
+        area.changed.connect(self._on_area_changed)
         self.scene.addItem(area)
         self.areas[name] = area
         self._extra_depts.add(name)

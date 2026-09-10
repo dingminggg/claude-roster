@@ -159,3 +159,23 @@ def test_ensure_drops_scales_of_gone_members():
                         "seats": {"a": [18, 26, 0.5], "ghost": [240, 26, 0.5]}})
     lay = layout.ensure(lay, [_m("a", "d")])
     assert set(lay.scales) == {"a"}
+
+
+def test_snap_picks_nearest_slot():
+    """拖到哪一格就咬哪一格:松手自动对齐,不用自己对得那么准。"""
+    got = layout.snap_to_slot((30, 40), (452, 400))
+    assert got == layout.AREA_PAD                    # 离左上那格最近
+
+
+def test_snap_skips_occupied_slots():
+    """别人占着的格子跳过——不然两个工位会叠在一起。"""
+    first = layout.AREA_PAD
+    got = layout.snap_to_slot((first[0] + 6, first[1] + 6), (452, 400),
+                              taken=[first])
+    assert got != first
+    assert got in list(layout._slots(452, 400))
+
+
+def test_snap_on_tiny_area_keeps_position():
+    """地毯太小、一个槽位都没有 → 原样返回,别把工位甩到 (0,0)。"""
+    assert layout.snap_to_slot((77, 55), (60, 40)) == (77.0, 55.0)
