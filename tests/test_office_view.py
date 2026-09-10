@@ -77,7 +77,6 @@ def test_seat_click_is_forwarded_as_member_clicked(win):
 
 
 
-
 def test_menu_copy_address_disabled_not_hidden(win):
     """探不到会话地址时该项置灰而不是隐藏——隐藏用户会以为功能没了。"""
     menu = win.build_menu("fad")
@@ -113,21 +112,6 @@ def test_scene_rect_grows_with_content(win):
     assert win.scene.sceneRect().width() > before.width()
 
 
-def test_focus_content_puts_office_at_viewport_topleft(win, app):
-    """开窗别停在 sceneRect 中央那片空地上:办公室要在左上角。"""
-    win.resize(700, 500)
-    win.show()
-    app.processEvents()
-    win.refit_scene()
-    win.focus_content()
-    app.processEvents()
-    canvas = win.centralWidget()
-    seen = canvas.mapToScene(canvas.viewport().rect()).boundingRect()
-    content = win.scene.itemsBoundingRect()
-    assert seen.left() <= content.left()
-    assert seen.top() <= content.top()
-    assert seen.left() > content.left() - 200      # 不是停在几百像素外的空地
-    assert seen.top() > content.top() - 200
 
 
 def test_always_on_top_does_not_force_hidden_window_open(win, app):
@@ -216,7 +200,6 @@ def test_session_row_shows_title_and_untitled_fallback(win):
     assert "补单测" in win.seats["fad"]._sub
 
 
-
 def test_refit_scene_keeps_camera_put(win, app):
     """拖完工位 400ms 后存盘会顺带 refit。只要内容还装得下,镜头就不许自己跳
     (装不下才缩回去,那是另一个测试的事)。"""
@@ -240,9 +223,6 @@ def test_refit_scene_keeps_camera_put(win, app):
 
 def _menu_items(menu):
     return [a.text() for a in menu.actions()]
-
-
-
 
 
 
@@ -302,34 +282,8 @@ def test_canvas_menu_on_blank_offers_new_area(win):
     assert not any(t.startswith("删除") for t in texts)
 
 
-def test_zoom_never_exceeds_one_or_goes_below_fit(win, app):
-    """手动缩放夹在「刚好看全」和 100% 之间:再放大只会更看不全,
-    再缩小也没意义(已经看全了)。"""
-    win.resize(700, 500)
-    win.show()
-    app.processEvents()
-    for _ in range(10):
-        win._zoom_by(1.15)
-    assert win.zoom <= 1.0
-    for _ in range(10):
-        win._zoom_by(1 / 1.15)
-    assert win.zoom >= win.fit_scale() - 0.01
 
 
-def test_content_growing_out_of_view_gets_refit(win, app):
-    """把地毯拖到很远 → 内容超出视口 → 自动缩回到看得全。"""
-    win.resize(700, 500)
-    win.show()
-    app.processEvents()
-    before = win.zoom
-    win.areas["后端组"].setPos(2400, 1800)
-    win.refit_scene()
-    app.processEvents()
-    assert win.zoom < before                  # 缩回去了
-    assert win.zoom == win.fit_scale()        # 缩到「刚好看全」那一档
-    # 注意:fit_scale 有 0.35 的下限——内容大到那个程度时,宁可看不全也不缩成蚂蚁
-    from claude_cockpit.office.view import ZOOM_MIN
-    assert win.zoom >= ZOOM_MIN
 
 
 def test_person_menu_clocks_in_and_out(win):
@@ -395,8 +349,9 @@ def test_files_menu_of_running_seat_cannot_start_another(win):
 
 
 def test_seat_menu_is_about_the_member(win):
-    texts = [a.text() for a in win.build_menu("fad", "seat").actions()]
-    assert texts == ["复制会话地址", "打开目录", "编辑", "删除"]
+    texts = [a.text() for a in win.build_menu("fad", "seat").actions()
+             if a.text()]
+    assert texts == ["大小", "复制会话地址", "打开目录", "编辑", "删除"]
 
 
 def test_file_stack_follows_session_count(win):
@@ -405,3 +360,25 @@ def test_file_stack_follows_session_count(win):
     assert win.seats["fad"]._papers == 2
     win.set_sessions("fad", [])
     assert win.seats["fad"]._papers == 0
+
+
+def test_each_seat_scales_on_its_own(win, app, tmp_path, monkeypatch):
+    """整体缩放退休了,换成每个工位单独缩:不常用的缩小,别人不受影响。"""
+    from claude_cockpit import settings
+    win.set_seat_scale("fad", 0.5)
+    assert win.seats["fad"].scale() == 0.5
+    assert win.seats["fad-2"].scale() == 1.0        # 别人纹丝不动
+
+    win.save_layout()
+    monkeypatch.setattr(settings, "_path", lambda: tmp_path / "settings.json")
+    again = OfficeWindow(_members())
+    assert again.seats["fad"].scale() == 0.5        # 重开还记得
+    assert again.seats["fad-2"].scale() == 1.0
+
+
+def test_size_menu_marks_current_scale(win):
+    win.set_seat_scale("fad", 0.7)
+    menu = win.build_menu("fad", "seat")
+    size = next(a.menu() for a in menu.actions() if a.text() == "大小")
+    checked = [a.text() for a in size.actions() if a.isChecked()]
+    assert checked == ["小"]

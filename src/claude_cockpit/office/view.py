@@ -23,8 +23,9 @@ from .dept_area import DeptAreaItem
 from .seat_item import SeatItem
 from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 
-ZOOM_MIN, ZOOM_MAX = 0.35, 1.0   # 上限 1.0:放大到超出原始尺寸没意义,
-                                 # 只会让人看不全(缩放的下限由「适应窗口」算)
+# 每个工位自己的大小档位。**整体缩放已经退休**:那是把所有人一起缩,等于没解决
+# 「成员多了看不过来」——真正要的是把不常用的单独缩小。
+SEAT_SCALES = (("标准", 1.0), ("小", 0.7), ("更小", 0.5))
 SAVE_DEBOUNCE_MS = 400
 
 
@@ -37,9 +38,8 @@ def _session_label(s) -> str:
 class _Canvas(QGraphicsView):
     """只管画背景网格和缩放;业务全在 OfficeWindow。"""
 
-    def __init__(self, scene, on_zoom):
+    def __init__(self, scene):
         super().__init__(scene)
-        self._on_zoom = on_zoom
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setBackgroundBrush(QBrush(BG))
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -78,12 +78,6 @@ class _Canvas(QGraphicsView):
             p.drawLine(r.left(), y, r.right(), y)
             y += TILE
 
-    def wheelEvent(self, e):
-        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            self._on_zoom(1.15 if e.angleDelta().y() > 0 else 1 / 1.15)
-            e.accept(); return
-        super().wheelEvent(e)           # 普通滚轮 = 平移
-
 
 class OfficeWindow(QMainWindow):
     member_clicked = Signal(str)
@@ -102,12 +96,11 @@ class OfficeWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("驾驶舱")
         self.scene = QGraphicsScene(self)
-        self.zoom = 1.0
         self.seats: dict[str, SeatItem] = {}
         self.areas: dict[str, DeptAreaItem] = {}
         self._sessions: dict[str, list] = {}
         self._addrs: dict[str, str | None] = {}
-        self._canvas = _Canvas(self.scene, self._zoom_by)
+        self._canvas = _Canvas(self.scene)
         self.setCentralWidget(self._canvas)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -148,18 +141,17 @@ class OfficeWindow(QMainWindow):
             seat.setParentItem(area)
             sx, sy = lay.seats[m.name]
             seat.setPos(sx, sy)
+            seat.setScale(lay.scales.get(m.name, 1.0))
             seat.clicked.connect(self.member_clicked.emit)
             seat.speaker_clicked.connect(self.stop_speaking_requested.emit)
             seat.moved.connect(self._on_seat_dropped)
             self.seats[m.name] = seat
-        self._apply_zoom(lay.zoom)
         self.refit_scene()
         # 窗口尺寸和镜头都只在第一次装配时设:rebuild 每次增删改成员都会跑,
         # 每次都设的话,改一个成员的 emoji 就把窗口缩回存盘尺寸、视角弹回左上角
         if not self._framed:
             self.resize(*lay.window)
             self._framed = True
-        self.fit_content()
 
     def _area_at(self, seat) -> str | None:
         """工位中心落在哪块地毯上。压着两块边界时取 z 值最上面的那块。"""
@@ -245,40 +237,7 @@ class OfficeWindow(QMainWindow):
         self.scene.setSceneRect(r.adjusted(-60, -40, 60, 40))
         if center is not None:
             self._canvas.centerOn(center)
-        self._fit_if_needed()
 
-    def fit_scale(self) -> float:
-        """把全部内容装进当前视口所需的缩放(不超过 1.0,也不缩到看不清)。"""
-        r = self.scene.itemsBoundingRect()
-        vp = self._canvas.viewport().size()
-        if r.isEmpty() or r.width() <= 0 or r.height() <= 0 or vp.width() <= 10:
-            return 1.0
-        pad = 24
-        k = min((vp.width() - pad) / r.width(), (vp.height() - pad) / r.height())
-        return max(ZOOM_MIN, min(1.0, k))
-
-    def _fit_if_needed(self) -> None:
-        """只有「现在装不下了」才缩回去。
-
-        每次布局变动都无条件 fit 的话,拖完一个工位镜头就自己跳一下——之前踩过。
-        所以这里只保证下界:内容一旦超出视口,就缩到刚好看全;还装得下就别动。
-        """
-        if self.fit_scale() < self.zoom - 0.01:
-            self.fit_content()
-
-    def fit_content(self) -> None:
-        """缩放到刚好装得下全部内容并居中——「一眼看全」是这个面板的本分,
-        所以它是默认行为:开窗、改窗口大小、布局变动之后都会重来一次。"""
-        r = self.scene.itemsBoundingRect()
-        if r.isEmpty():
-            return
-        self._apply_zoom(self.fit_scale())
-        self._canvas.centerOn(r.center())
-
-    # 老名字留着:main.py 之外没人叫它,但改名没必要牵连调用方
-    focus_content = fit_content
-
-    # ---------- 对外接口(与 panel.Panel 同名同签名) ----------
     def set_run_state(self, name: str, state: str) -> None:
         seat = self.seats.get(name)
         if seat is not None:
@@ -387,9 +346,29 @@ class OfficeWindow(QMainWindow):
         menu._submenus = tuple(subs)     # 防回收:子菜单在 Python 侧得有人持有
         return menu
 
+    def set_seat_scale(self, name: str, k: float) -> None:
+        """把某个工位单独缩放:成员多了,不常用的缩小,常用的留原样。"""
+        seat = self.seats.get(name)
+        if seat is None:
+            return
+        seat.setScale(k)
+        self.refit_scene()
+        self._queue_save()
+
     def _menu_member(self, name: str) -> QMenu:
-        """点工位其余地方:这个成员本身的事。"""
+        """点工位其余地方:这个成员本身的事 + 这个工位显示多大。"""
         menu = QMenu(self)
+        seat = self.seats.get(name)
+        size = QMenu("大小", menu)
+        for label, k in SEAT_SCALES:
+            act = size.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(seat is not None and abs(seat.scale() - k) < 0.01)
+            act.triggered.connect(
+                lambda _=False, kk=k: self.set_seat_scale(name, kk))
+        menu.addMenu(size)
+        menu._submenus = (size,)         # 防回收
+        menu.addSeparator()
         addr = self._addrs.get(name)
         copy = menu.addAction("复制会话地址")
         if addr:
@@ -415,7 +394,6 @@ class OfficeWindow(QMainWindow):
         at = (scene_pos.x(), scene_pos.y()) if scene_pos is not None else None
         menu.addAction("新建部门区域").triggered.connect(
             lambda: self._ask_new_area(at))
-        menu.addAction("适应窗口").triggered.connect(self.fit_content)
         if area:
             menu.addSeparator()
             menu.addAction(f"重命名「{area}」").triggered.connect(
@@ -457,17 +435,6 @@ class OfficeWindow(QMainWindow):
         self.build_canvas_menu(area, scene_pos).exec(e.globalPos())
 
     # ---------- 内部 ----------
-    def _zoom_by(self, factor: float) -> None:
-        """Ctrl+滚轮:仍然能手动缩放,但**下限就是「刚好看全」**,
-        不让人缩到比看全还小、或放大到超出原始尺寸——那都只会更看不全。"""
-        self._apply_zoom(max(self.fit_scale(), self.zoom * factor))
-        self._queue_save()
-
-    def _apply_zoom(self, z: float) -> None:
-        self.zoom = max(ZOOM_MIN, min(ZOOM_MAX, z))
-        self._canvas.resetTransform()
-        self._canvas.scale(self.zoom, self.zoom)
-
     def _queue_save(self) -> None:
         self._save_timer.start()        # 拖动过程中别每帧写盘
 
@@ -475,18 +442,14 @@ class OfficeWindow(QMainWindow):
         lay = layout_mod.Layout(
             areas={n: a.geometry() for n, a in self.areas.items()},
             seats={n: (s.pos().x(), s.pos().y()) for n, s in self.seats.items()},
+            scales={n: s.scale() for n, s in self.seats.items() if s.scale() != 1.0},
             depts=sorted(self.areas),
             window=(self.width(), self.height()),
-            zoom=self.zoom,
         )
         s = settings.load()
         s["office"] = layout_mod.dump(lay)
         settings.save(s)
         self.refit_scene()
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self.fit_content()
 
     def showEvent(self, e):
         super().showEvent(e)

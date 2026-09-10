@@ -136,3 +136,26 @@ def test_dept_list_survives_roundtrip():
     lay = layout.parse(layout.dump(layout.ensure(
         layout.parse({"depts": ["空组"]}), [_m("a", "后端组")])))
     assert "空组" in lay.depts and "空组" in lay.areas
+
+
+def test_seat_scale_roundtrip_and_old_format():
+    """工位可以各缩各的。老文件是 [x, y],带缩放的是 [x, y, scale],两种都认;
+    缩放是 1.0 就不写进文件(省得每个工位后面拖个没用的 1.0)。"""
+    lay = layout.parse({"seats": {"a": [10, 20], "b": [30, 40, 0.5]}})
+    assert lay.seats == {"a": (10.0, 20.0), "b": (30.0, 40.0)}
+    assert lay.scales == {"b": 0.5}
+    out = layout.dump(lay)
+    assert out["seats"]["a"] == [10, 20]
+    assert out["seats"]["b"] == [30, 40, 0.5]
+
+
+def test_absurd_scale_is_dropped():
+    lay = layout.parse({"seats": {"a": [0, 0, 9], "b": [0, 0, 0.01]}})
+    assert lay.scales == {}
+
+
+def test_ensure_drops_scales_of_gone_members():
+    lay = layout.parse({"areas": {"d": [0, 0, 452, 216]},
+                        "seats": {"a": [18, 26, 0.5], "ghost": [240, 26, 0.5]}})
+    lay = layout.ensure(lay, [_m("a", "d")])
+    assert set(lay.scales) == {"a"}

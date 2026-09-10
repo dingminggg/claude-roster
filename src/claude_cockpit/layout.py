@@ -12,11 +12,11 @@ from dataclasses import dataclass, field
 
 # 工位尺寸是**这里说了算**:office/seat_item.py 从这儿 import,
 # 布局算账和绘制才不会各持一份、悄悄对不上。
-SEAT_W, SEAT_H = 200, 166
+SEAT_W, SEAT_H = 200, 146
 GAP = 16                        # 工位之间的间距
 AREA_PAD = (18.0, 26.0)         # 区域内第一个工位的左上留白(26 让开地毯上的部门名)
-AREA_MIN = (240.0, 216.0)       # 区域最小尺寸(装得下一个工位 + 留白)
-AREA_DEFAULT = (452.0, 216.0)   # 一块地毯至少这么大(一排两个工位)
+AREA_MIN = (240.0, 200.0)       # 区域最小尺寸(装得下一个工位 + 留白)
+AREA_DEFAULT = (452.0, 200.0)   # 一块地毯至少这么大(一排两个工位)
 AREA_COLS = 3                   # 新地毯按几列铺:再宽一屏就装不下了
 AREA_ORIGIN = (10.0, 30.0)      # 第一块地毯的落点
 DEFAULT_WINDOW = (900, 620)
@@ -27,6 +27,8 @@ UNASSIGNED = "未分配"           # 没填 dept 的成员归到这块地毯
 class Layout:
     areas: dict[str, tuple[float, float, float, float]] = field(default_factory=dict)
     seats: dict[str, tuple[float, float]] = field(default_factory=dict)
+    # 每个工位自己的缩放:成员多了,不常用的可以单独缩小。缺省 1.0 不落盘。
+    scales: dict[str, float] = field(default_factory=dict)
     # 用户手工建出来的部门(可能还一个人都没有)。不记这份名单的话,
     # 「先建好空地毯、再把人拖进去」这个流程第一步就没了——ensure 会把没人的
     # 地毯当残留清掉。
@@ -65,16 +67,22 @@ def parse(raw) -> Layout:
         got = _nums(v, 4)
         if got and got[2] >= AREA_MIN[0] and got[3] >= AREA_MIN[1]:
             areas[str(k)] = got
+    scales = {}
     for k, v in _items(raw, "seats"):
-        got = _nums(v, 2)
-        if got:
-            seats[str(k)] = got
+        # 老文件是 [x, y];带缩放的是 [x, y, scale]。两种都认。
+        got = _nums(v, 2) or _nums(v, 3)
+        if not got:
+            continue
+        seats[str(k)] = got[:2]
+        if len(got) == 3 and 0.2 <= got[2] <= 1.0:
+            scales[str(k)] = got[2]
     depts = [str(d) for d in raw.get("depts") or [] if isinstance(d, str)]
     win = _nums(raw.get("window"), 2)
     zoom = raw.get("zoom")
     return Layout(
         areas=areas,
         seats=seats,
+        scales=scales,
         depts=depts,
         window=(int(win[0]), int(win[1])) if win else DEFAULT_WINDOW,
         zoom=float(zoom) if isinstance(zoom, (int, float))
@@ -86,7 +94,9 @@ def dump(lay: Layout) -> dict:
     return {
         "areas": {k: [_i(v[0]), _i(v[1]), _i(v[2]), _i(v[3])]
                   for k, v in lay.areas.items()},
-        "seats": {k: [_i(v[0]), _i(v[1])] for k, v in lay.seats.items()},
+        "seats": {k: ([_i(v[0]), _i(v[1])] if lay.scales.get(k, 1.0) == 1.0
+                      else [_i(v[0]), _i(v[1]), lay.scales[k]])
+                  for k, v in lay.seats.items()},
         "depts": list(lay.depts),
         "window": [int(lay.window[0]), int(lay.window[1])],
         "zoom": lay.zoom,
@@ -169,8 +179,9 @@ def ensure(lay: Layout, members) -> Layout:
                 areas[d] = (x, y, w, h)
             seats[name] = spot
             taken.add(spot)
-    return Layout(areas=areas, seats=seats, depts=depts,
-                  window=lay.window, zoom=lay.zoom)
+    return Layout(areas=areas, seats=seats,
+                  scales={k: v for k, v in lay.scales.items() if k in seats},
+                  depts=depts, window=lay.window, zoom=lay.zoom)
 
 
 def _grow_x(w: float) -> float:

@@ -98,8 +98,7 @@ class SeatItem(QGraphicsObject):
         self._state = state if state in STATE_STYLE else "running"
         self.setCursor(Qt.CursorShape.PointingHandCursor if self.is_up()
                        else Qt.CursorShape.ArrowCursor)
-        # 状态本身靠屏幕颜色表达,画面上不写字;文字版挂 tooltip,悬停查得到
-        self.setToolTip(f"{self.name} · {self.status_text()}")
+        self._sync_tip()
         self.update()
 
     def set_message(self, on: bool) -> None:
@@ -117,6 +116,7 @@ class SeatItem(QGraphicsObject):
 
     def set_title(self, text: str) -> None:
         self._title = text or ""
+        self._sync_tip()
         self.update()
 
     def set_session_count(self, n: int) -> None:
@@ -127,9 +127,25 @@ class SeatItem(QGraphicsObject):
             self.update()
 
     def set_subtitle(self, text: str) -> None:
-        """未运行时显示的「上次会话 / 新会话」。"""
+        """没上班时那条「上次会话 / 新会话」——只出现在文件堆的悬停提示里。"""
         self._sub = text or "新会话"
+        self._sync_tip()
         self.update()
+
+    def _sync_tip(self, where: str = "seat") -> None:
+        """悬停提示按落点给不同的信息:画面上不写状态和会话标题(那会把白模
+        场景堆满字),但悬停要查得到——鼠标停在人身上问「他在干嘛」,
+        停在文件堆上问「这是哪条会话」。"""
+        if where == "person":
+            tip = f"{self.name} · {self.status_text()}"
+        elif where == "files":
+            n = self._papers
+            tip = f"{self._title or self._sub}" + (f"(共 {n} 条历史会话)" if n else "")
+        else:
+            tip = f"{self.name} · {self.status_text()}"
+            if self._title:
+                tip += "\n" + self._title
+        self.setToolTip(tip)
 
     # ---------- 查询(测试与绘制共用) ----------
     def is_up(self) -> bool:
@@ -269,19 +285,15 @@ class SeatItem(QGraphicsObject):
             p.drawText(self.r_speaker(), Qt.AlignmentFlag.AlignCenter, "🔊")
         p.setPen(Qt.PenStyle.NoPen)
 
-        # 底部一行:只有控制台标题(没上班时是上次会话)。
-        # **状态不写字**——忙/闲/启动中全靠屏幕颜色表达,底下再挂个胶囊是重复。
-        # 文字版状态留在 tooltip 里(见 set_run_state),悬停查得到。
-        p.setFont(FONT_SUB)
-        p.setPen(QPen(DIM))
-        p.drawText(QRectF(14, 144, 172, 18),
-                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter,
-                   _elide(self._title if up else self._sub, 24))
 
     # ---------- 交互 ----------
     def hoverEnterEvent(self, e):
         self._hover = True
+        self._sync_tip(self.hit(e.pos()))
         self.update()
+
+    def hoverMoveEvent(self, e):
+        self._sync_tip(self.hit(e.pos()))
 
     def hoverLeaveEvent(self, e):
         self._hover = False
