@@ -24,7 +24,7 @@ from ..layout import SEAT_H, SEAT_W
 from .theme import (
     BEZEL, CHAIR, CHAIR_DARK, DESK_FRONT, DESK_FRONT_OFF, DESK_LEG, DESK_TOP,
     DESK_TOP_OFF, DIM, HEAD, MUG, NO_BG, NO_FG, OFF_OPACITY, SCREEN_OFF,
-    PAPER, PAPER_LINE, SHADOW, SHADOW_HARD, TXT, YES_BG, YES_FG,
+    PAPER, PAPER_EDGE, PAPER_LINE, SHADOW, SHADOW_HARD, TXT, YES_BG, YES_FG,
 )
 
 
@@ -241,10 +241,13 @@ class SeatItem(QGraphicsObject):
         if self._papers:
             for i in range(min(3, self._papers)):
                 off = i * 3
+                p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QBrush(SHADOW))
-                p.drawRoundedRect(QRectF(137 - off, 35 - off + 2, 28, 20), 2, 2)
+                p.drawRoundedRect(QRectF(137 - off, 37 - off, 28, 20), 2, 2)
+                p.setPen(QPen(PAPER_EDGE, 1))       # 白纸压白桌,得勾条边
                 p.setBrush(QBrush(PAPER))
                 p.drawRoundedRect(QRectF(136 - off, 34 - off, 28, 20), 2, 2)
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(PAPER_LINE))          # 最上面那张画两条「字」
             p.drawRect(QRectF(140 - (min(3, self._papers) - 1) * 3,
                               38 - (min(3, self._papers) - 1) * 3, 16, 1.5))

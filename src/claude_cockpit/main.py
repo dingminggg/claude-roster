@@ -194,8 +194,10 @@ def main() -> int:
             panel.set_speaking(m.name,
                                states[m.name] in UP_STATES
                                and m.name in cur_speaking)
-            # 刚回到/初次为「未运行」→ 刷新它的会话下拉(避免每 tick 重扫文件)
-            if states[m.name] == "down" and member_states.get(m.name) != "down":
+            # 状态一变就重扫它的历史会话(首个 tick 每个成员都会走一次)。
+            # 以前只在「变成未上班」时扫,于是正在跑的成员桌上一张纸都没有——
+            # 那叠文件就是会话历史,右键它才能挑会话,不能只有下班的人才有。
+            if member_states.get(m.name) != states[m.name]:
                 _refresh_sessions(m.name)
             member_states[m.name] = states[m.name]
 

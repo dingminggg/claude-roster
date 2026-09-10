@@ -39,6 +39,7 @@ CHAIR_DARK = QColor("#d7dae0")      # 椅背 / 气杆
 MUG = QColor("#dfe2e7")             # 桌上的杯子
 PAPER = QColor("#fdfdfe")           # 桌上那叠文件(一张 = 一条历史会话)
 PAPER_LINE = QColor("#c9ced8")      # 纸上那两条「字」
+PAPER_EDGE = QColor("#b9c0cb")      # 纸的边:白纸压白桌,不勾边看不出来
 
 # ---------- 电脑 ----------
 BEZEL = QColor("#2b2f36")       # 屏幕边框 / 支架:全白场景里唯一的深色物件
