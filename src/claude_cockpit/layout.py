@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-SEAT_W, SEAT_H = 180, 112
-GAP = 20                        # 工位之间的间距
-AREA_PAD = (20.0, 26.0)         # 区域内第一个工位的左上留白(26 让开地毯上的部门名)
-AREA_MIN = (200.0, 120.0)       # 区域最小尺寸(与 DeptAreaItem 的拉伸下限一致)
-AREA_DEFAULT = (420.0, 150.0)   # 一块地毯至少这么大(一排两个工位)
+# 工位尺寸是**这里说了算**:office/seat_item.py 从这儿 import,
+# 布局算账和绘制才不会各持一份、悄悄对不上。
+SEAT_W, SEAT_H = 200, 166
+GAP = 16                        # 工位之间的间距
+AREA_PAD = (18.0, 26.0)         # 区域内第一个工位的左上留白(26 让开地毯上的部门名)
+AREA_MIN = (240.0, 216.0)       # 区域最小尺寸(装得下一个工位 + 留白)
+AREA_DEFAULT = (452.0, 216.0)   # 一块地毯至少这么大(一排两个工位)
 AREA_COLS = 3                   # 新地毯按几列铺:再宽一屏就装不下了
 AREA_ORIGIN = (10.0, 30.0)      # 第一块地毯的落点
 DEFAULT_WINDOW = (900, 620)

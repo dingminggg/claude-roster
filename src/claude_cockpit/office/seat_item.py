@@ -1,8 +1,13 @@
-"""一个工位 = 一个成员的控制台。俯视画法:L 形隔断 + 大桌板(显示器背面 /
-键盘 / 鼠标 / 刻在桌面的成员名)+ 办公椅(靠背用成员配色)+ 员工 emoji + 绿植。
+"""一个工位 = 一个成员的控制台。3/4 斜视画法(不是正俯视):
 
-屏幕光的颜色 = 运行状态(忙=蓝 / 闲=绿 / 启动中=琥珀);屏幕**闪** = 有新消息
-(答完一轮 / 等你确认)。未运行不闪——没窗口就没有「在等你」这回事。
+    名字浮在头顶 → 椅子 → 人(肩膀用成员配色,脑袋上压 emoji)→ 桌子(梯形桌面 +
+    前沿板厚 + 两条桌腿)→ 显示器(屏幕朝观察者)→ 桌下一条信息条
+
+正俯视画出来所有东西都像贴纸,而且显示器只能画背面、认不出是电脑;斜视才有
+「有人坐在那儿上班」的样子。**颜色只给两样**:屏幕(=运行状态)和人(=成员配色),
+其余全是白模,场景才不花。
+
+没上班就是**空椅子 + 黑屏**——比「整张工位灰掉」直觉得多。
 
 本图元只画和报事件:状态由 set_* 喂进来,不认识 peers / winman / launcher。
 命中区由 r_* 一处给出,paint 和 mousePressEvent 共用同一份坐标,避免两处漂移。
@@ -12,20 +17,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import (
-    QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen,
-)
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
+from ..layout import SEAT_H, SEAT_W
 from .theme import (
-    CHAIR, CHAIR_SEAT, DESK, DESK_EDGE, DESK_EDGE_OFF, DESK_OFF, DIM, FLOOR,
-    BEZEL, FLOOR_HOVER, HEAD, KEYS, LAPTOP, LAPTOP_EDGE, MOUSE, NO_BG,
-    NO_FG, OFF_OPACITY, OFF_TINT, SCREEN_OFF,
-    PART, PART_SIDE, PART_TOP, PLANT, PLANT_OFF, PLANT_POT, SHADOW,
-    SHADOW_SOFT, TXT, YES_BG, YES_FG, mix,
+    BEZEL, CHAIR, CHAIR_DARK, DESK_FRONT, DESK_FRONT_OFF, DESK_LEG, DESK_TOP,
+    DESK_TOP_OFF, DIM, HEAD, MUG, NO_BG, NO_FG, OFF_OPACITY, SCREEN_OFF,
+    SHADOW, SHADOW_HARD, TXT, YES_BG, YES_FG,
 )
-
-SEAT_W, SEAT_H = 180, 112
 
 
 def _font(size: int, bold: bool = False) -> QFont:
@@ -37,9 +37,9 @@ def _font(size: int, bold: bool = False) -> QFont:
 
 # 字号从不随状态变:提到模块级建一次。paint 每帧重建 QFont 要走字体匹配查找,
 # 而 paint 是「每个工位 × 每次 tick/闪烁/悬停」都跑的。
-FONT_NAME = _font(8, bold=True)     # 刻在桌面上的成员名
-FONT_SPEAKER = _font(9)             # 朗读小喇叭(名字右边)
-FONT_EMOJI = _font(11)              # 椅子上的员工
+FONT_NAME = _font(9, bold=True)     # 浮在头顶的成员名
+FONT_SPEAKER = _font(9)             # 朗读小喇叭
+FONT_EMOJI = _font(12)              # 脑袋上的 emoji
 FONT_PILL = _font(8, bold=True)     # 状态胶囊 / 启动键
 FONT_SUB = _font(8)                 # 会话行 / 控制台标题
 
@@ -56,8 +56,7 @@ class _Style:
     glow: str
 
 
-# 浅底上的配色:胶囊用实色底 + 白字(浅底浅字看不清),屏幕光取更饱和的一档,
-# 否则洒在浅木色桌面上等于没有。
+# 屏幕色 = 状态色;胶囊用实色底 + 白字(浅底浅字看不清)。
 STATE_STYLE = {
     "down":      _Style("启动",   "#eef0f3", "#4b5563", "#c9ced6"),
     "launching": _Style("启动中", "#c2760a", "#ffffff", "#f0a92e"),
@@ -74,7 +73,7 @@ def _elide(s: str, n: int) -> str:
 class SeatItem(QGraphicsObject):
     """一个工位。QGraphicsObject(而非 QGraphicsItem)是为了能发信号。"""
 
-    clicked = Signal(str)               # 点桌面:置前该成员的控制台
+    clicked = Signal(str)               # 点工位:置前该成员的控制台
     start_clicked = Signal(str)         # 点「启动」:展开内联确认
     confirmed = Signal(str)             # 点 ✓:真的拉起
     picker_clicked = Signal(str)        # 点会话行:弹会话下拉
@@ -148,19 +147,19 @@ class SeatItem(QGraphicsObject):
         return QRectF(0, 0, SEAT_W, SEAT_H)
 
     def r_go(self) -> QRectF:
-        return QRectF(96, 84, 56, 22)
+        return QRectF(22, 142, 56, 20)
 
     def r_yes(self) -> QRectF:
-        return QRectF(96, 84, 27, 22)
+        return QRectF(22, 142, 27, 20)
 
     def r_no(self) -> QRectF:
-        return QRectF(125, 84, 27, 22)
+        return QRectF(51, 142, 27, 20)
 
     def r_picker(self) -> QRectF:
-        return QRectF(94, 64, 80, 18)
+        return QRectF(84, 142, 110, 20)
 
     def r_speaker(self) -> QRectF:
-        return QRectF(162, 20, 16, 20)
+        return QRectF(172, 0, 22, 16)
 
     def hit(self, pos: QPointF) -> str:
         """局部坐标 → "go"/"yes"/"no"/"picker"/"speaker"/"seat"。"""
@@ -187,146 +186,101 @@ class SeatItem(QGraphicsObject):
         p.setOpacity(1.0 if up else OFF_OPACITY)
         flash = self.is_flashing()
         glow = QColor(st.glow)
-        # 浅底上不能用 lighter() 表示「更亮」——那只会变淡、更看不见。
-        # 闪的半拍改成:光晕加浓 + 整个工位地面染一层状态色。
-
-        # 工位投影:整块离地一点点,俯视才不像贴纸
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(SHADOW_SOFT))
-        p.drawRoundedRect(QRectF(2, 4, SEAT_W - 2, SEAT_H - 2), 8, 8)
 
-        # 工位地面(部门地毯在底下透出来)
-        base = FLOOR_HOVER if self._hover else FLOOR
-        p.setBrush(QBrush(mix(base, glow, 0.22) if flash else base))
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, SEAT_W, SEAT_H), 8, 8)
-        p.drawPath(path)
+        # 有新消息:整张工位罩一层状态色光晕。白模场景里这比「把屏幕调亮」显眼得多
+        if flash:
+            halo = QColor(glow)
+            halo.setAlpha(52)
+            p.setBrush(QBrush(halo))
+            p.drawRoundedRect(QRectF(6, 10, SEAT_W - 12, SEAT_H - 16), 14, 14)
+        elif self._hover:
+            p.setBrush(QBrush(QColor(255, 255, 255, 170)))
+            p.drawRoundedRect(QRectF(6, 10, SEAT_W - 12, SEAT_H - 16), 14, 14)
 
-        # L 形隔断:顶面(受光)亮一档、朝内的侧壁压暗一档,板子才有厚度
-        p.setBrush(QBrush(PART))
-        p.drawRect(QRectF(0, 0, SEAT_W, 10))
-        p.drawRect(QRectF(0, 0, 8, SEAT_H))
-        p.setBrush(QBrush(PART_TOP))
-        p.drawRect(QRectF(0, 0, SEAT_W, 3))
-        p.drawRect(QRectF(0, 0, 3, SEAT_H))
-        p.setBrush(QBrush(PART_SIDE))
-        p.drawRect(QRectF(0, 10, SEAT_W, 2))
-        p.drawRect(QRectF(8, 10, 2, SEAT_H - 10))
-        # 隔断打在地面上的影子
-        p.setBrush(QBrush(SHADOW_SOFT))
-        p.drawRect(QRectF(0, 12, SEAT_W, 3))
-        p.drawRect(QRectF(10, 12, 3, SEAT_H - 12))
-
-        # 大桌板:横跨上半,底边加亮做厚度
+        # 地面投影:桌椅合起来的一大片软影,是立体感的主要来源
         p.setBrush(QBrush(SHADOW))
-        p.drawRoundedRect(QRectF(13, 20, 156, 46), 3, 3)      # 桌子的影子
-        p.setBrush(QBrush(DESK if up else DESK_OFF))
-        p.drawRoundedRect(QRectF(12, 14, 156, 46), 3, 3)
-        p.setBrush(QBrush(DESK_EDGE if up else DESK_EDGE_OFF))
-        p.drawRect(QRectF(12, 56, 156, 4))                    # 看得见的板厚(前沿)
+        p.drawPolygon(QPolygonF([QPointF(28, 108), QPointF(150, 108),
+                                 QPointF(196, 142), QPointF(74, 142)]))
 
-        # 屏幕光:从显示器往下(朝员工)洒在桌面上
+        # 椅子(在桌子后面,先画):椅背 + 座垫 + 气杆
+        p.setBrush(QBrush(CHAIR_DARK))
+        p.drawRoundedRect(QRectF(78, 20, 46, 44), 10, 10)
+        p.setBrush(QBrush(CHAIR))
+        p.drawRoundedRect(QRectF(76, 58, 50, 16), 6, 6)
+        p.setBrush(QBrush(CHAIR_DARK))
+        p.drawRect(QRectF(99, 72, 4, 10))
+
+        # 人:肩膀用成员配色,脑袋是白的、上面压 emoji。没上班就不画人(空椅子)
         if up:
-            g = QLinearGradient(0, 36, 0, 60)
-            c0 = QColor(glow); c0.setAlpha(230 if flash else 150)
-            c1 = QColor(glow); c1.setAlpha(0)
-            g.setColorAt(0.0, c0)
-            g.setColorAt(1.0, c1)
-            p.setBrush(QBrush(g))
-            spill = QPainterPath()
-            spill.moveTo(28, 36)
-            spill.lineTo(72, 36)
-            spill.lineTo(84, 60)
-            spill.lineTo(16, 60)
-            spill.closeSubpath()
-            p.drawPath(spill)
+            p.setBrush(QBrush(self.color))
+            p.drawRoundedRect(QRectF(84, 42, 38, 36), 14, 14)
+            p.setBrush(QBrush(HEAD))
+            p.drawEllipse(QRectF(88, 18, 28, 28))
+            p.setFont(FONT_EMOJI)
+            p.setPen(QPen(TXT))
+            p.drawText(QRectF(88, 18, 28, 28),
+                       Qt.AlignmentFlag.AlignCenter, self.emoji)
+            p.setPen(Qt.PenStyle.NoPen)
 
-        # 笔记本电脑:屏幕朝观察者立起来一点(俯视里作弊透视),屏幕面 = 状态色;
-        # 下面连着机身键区。画成背面那个黑方块的话,根本认不出是电脑。
+        # 桌子:梯形桌面(近大远小)+ 前沿板厚 + 两条腿
+        p.setBrush(QBrush(SHADOW_HARD))
+        p.drawPolygon(QPolygonF([QPointF(36, 78), QPointF(166, 78),
+                                 QPointF(178, 104), QPointF(24, 104)]))
+        p.setBrush(QBrush(DESK_TOP if up else DESK_TOP_OFF))
+        p.drawPolygon(QPolygonF([QPointF(34, 74), QPointF(164, 74),
+                                 QPointF(176, 100), QPointF(22, 100)]))
+        p.setBrush(QBrush(DESK_FRONT if up else DESK_FRONT_OFF))
+        p.drawPolygon(QPolygonF([QPointF(22, 100), QPointF(176, 100),
+                                 QPointF(176, 106), QPointF(22, 106)]))
+        p.setBrush(QBrush(DESK_LEG))
+        p.drawRect(QRectF(30, 106, 6, 26))
+        p.drawRect(QRectF(162, 106, 6, 26))
+
+        # 显示器:屏幕朝观察者,亮起来就是状态色。摆在桌面左侧,别挡着人
         p.setBrush(QBrush(SHADOW))
-        p.drawRoundedRect(QRectF(27, 22, 48, 30), 3, 3)
-        # 屏幕:深色边框 + 里面一块亮屏
+        p.drawRoundedRect(QRectF(32, 58, 44, 28), 3, 3)
         p.setBrush(QBrush(BEZEL))
-        p.drawRoundedRect(QRectF(26, 17, 48, 21), 3, 3)
+        p.drawRoundedRect(QRectF(30, 54, 44, 28), 3, 3)
         p.setBrush(QBrush(glow if up else SCREEN_OFF))
-        p.drawRoundedRect(QRectF(29, 20, 42, 15), 2, 2)
+        p.drawRoundedRect(QRectF(32, 56, 40, 22), 2, 2)
         if up:
-            # 屏幕上几行「代码」,让它更像在干活
-            p.setBrush(QBrush(QColor(255, 255, 255, 150)))
-            for i, wpx in enumerate((26, 18, 30)):
-                p.drawRect(QRectF(32, 23 + i * 4, wpx, 2))
-        # 转轴 + 机身键区(比屏幕略宽,压在桌面上)
-        p.setBrush(QBrush(LAPTOP_EDGE))
-        p.drawRoundedRect(QRectF(24, 37, 52, 4), 2, 2)
-        p.setBrush(QBrush(LAPTOP))
-        p.drawRoundedRect(QRectF(22, 40, 56, 14), 3, 3)
-        p.setBrush(QBrush(KEYS))
-        p.drawRoundedRect(QRectF(27, 43, 46, 6), 1.5, 1.5)
-        p.setBrush(QBrush(LAPTOP_EDGE))
-        p.drawRoundedRect(QRectF(40, 50, 20, 3), 1.5, 1.5)     # 触控板
-        # 鼠标:机身右边
-        p.setBrush(QBrush(MOUSE))
-        p.drawEllipse(QRectF(82, 42, 7, 10))
+            p.setBrush(QBrush(QColor(255, 255, 255, 145)))
+            for i, wpx in enumerate((26, 16, 30)):
+                p.drawRect(QRectF(35, 60 + i * 5, wpx, 2))
+        p.setBrush(QBrush(BEZEL))
+        p.drawRect(QRectF(48, 82, 8, 3))                    # 支架
+        p.drawRoundedRect(QRectF(42, 85, 20, 3), 1.5, 1.5)  # 底座
+        p.setBrush(QBrush(MUG))
+        p.drawRoundedRect(QRectF(140, 78, 12, 12), 3, 3)    # 杯子,桌面别空着
 
-        # 成员名:直接刻在桌面右半边(不再套一张白工牌——身份已经由椅子靠背的
-        # 成员配色带着了,再加一张浅色卡只是在浅底上多堆一层)
+        # 名字:浮在头顶
         p.setFont(FONT_NAME)
         p.setPen(QPen(TXT if up else DIM))
-        p.drawText(QRectF(94, 20, 68, 20),
-                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                   _elide(self.name, 11))
+        p.drawText(QRectF(0, 0, SEAT_W, 14),
+                   Qt.AlignmentFlag.AlignCenter, _elide(self.name, 14))
 
-        # 朗读中:名字右侧一个小喇叭,点它停播
+        # 朗读中:名字右边一个小喇叭,点它停播
         if up and self._speaking:
             p.setFont(FONT_SPEAKER)
             p.setPen(QPen(TXT))
             p.drawText(self.r_speaker(), Qt.AlignmentFlag.AlignCenter, "🔊")
-
-        # 办公椅(俯视):靠背朝下,靠背用成员配色
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(SHADOW))
-        p.drawRoundedRect(QRectF(26, 70, 34, 30), 9, 9)       # 椅子的影子
-        p.setBrush(QBrush(CHAIR))
-        p.drawRoundedRect(QRectF(24, 70, 5, 16), 2, 2)
-        p.drawRoundedRect(QRectF(53, 70, 5, 16), 2, 2)
-        p.setBrush(QBrush(CHAIR_SEAT))
-        p.drawRoundedRect(QRectF(28, 66, 26, 26), 7, 7)
-        p.setBrush(QBrush(self.color if up else OFF_TINT))
-        p.drawRoundedRect(QRectF(25, 90, 32, 9), 4, 4)
-        p.setBrush(QBrush(HEAD))
-        p.drawEllipse(QRectF(32, 68, 22, 22))
-        p.setFont(FONT_EMOJI)
-        p.setPen(QPen(TXT))
-        p.drawText(QRectF(32, 68, 22, 22), Qt.AlignmentFlag.AlignCenter, self.emoji)
 
-        # 绿植:右下角
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(PLANT_POT))
-        p.drawRoundedRect(QRectF(160, 94, 12, 10), 2, 2)
-        p.setBrush(QBrush(PLANT if up else PLANT_OFF))
-        p.drawEllipse(QRectF(158, 84, 16, 14))
-
-        # 右下:状态胶囊 / 会话行 / 启动键
+        # 桌下信息条:上班了 = 状态胶囊 + 控制台标题;没上班 = 启动键 + 会话下拉
+        p.setFont(FONT_PILL)
         if up:
-            p.setFont(FONT_PILL)
             p.setBrush(QBrush(QColor(st.pill_bg)))
-            p.drawRoundedRect(QRectF(96, 64, 56, 20), 10, 10)
+            p.drawRoundedRect(QRectF(22, 142, 56, 20), 10, 10)
             p.setPen(QPen(QColor(st.pill_fg)))
-            p.drawText(QRectF(96, 64, 56, 20),
+            p.drawText(QRectF(22, 142, 56, 20),
                        Qt.AlignmentFlag.AlignCenter, st.label)
             p.setFont(FONT_SUB)
             p.setPen(QPen(DIM))
-            p.drawText(QRectF(94, 86, 62, 18),
+            p.drawText(QRectF(84, 142, 110, 20),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                       _elide(self._title, 9))
+                       _elide(self._title, 15))
         else:
-            p.setFont(FONT_SUB)
-            p.setPen(QPen(DIM))
-            p.drawText(self.r_picker(),
-                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                       "▾ " + _elide(self._sub, 12))
-            p.setFont(FONT_PILL)
-            p.setPen(Qt.PenStyle.NoPen)
             if self._confirm:
                 p.setBrush(QBrush(YES_BG))
                 p.drawRoundedRect(self.r_yes(), 10, 10)
@@ -341,6 +295,11 @@ class SeatItem(QGraphicsObject):
                 p.drawRoundedRect(self.r_go(), 10, 10)
                 p.setPen(QPen(QColor(st.pill_fg)))
                 p.drawText(self.r_go(), Qt.AlignmentFlag.AlignCenter, st.label)
+            p.setFont(FONT_SUB)
+            p.setPen(QPen(DIM))
+            p.drawText(self.r_picker(),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       "▾ " + _elide(self._sub, 15))
 
     # ---------- 交互 ----------
     def hoverEnterEvent(self, e):
@@ -354,7 +313,7 @@ class SeatItem(QGraphicsObject):
     def mousePressEvent(self, e):
         if e.button() != Qt.MouseButton.LeftButton:
             # 右键只该弹菜单。不挡掉的话,右键落在会话行上会弹会话下拉、
-            # 落在桌面上会被当成「点工位」把控制台最大化。
+            # 落在别处会被当成「点工位」把控制台最大化。
             e.ignore()
             return
         where = self.hit(e.pos())
@@ -378,7 +337,7 @@ class SeatItem(QGraphicsObject):
         if self.is_up():
             self.clicked.emit(self.name)
         self._press_pos = self.pos()    # 记下起点,松手时判断到底有没有挪
-        super().mousePressEvent(e)      # 桌面空白 = 拖动
+        super().mousePressEvent(e)      # 空白处 = 拖动
 
     def mouseReleaseEvent(self, e):
         if e.button() != Qt.MouseButton.LeftButton:
@@ -386,7 +345,7 @@ class SeatItem(QGraphicsObject):
             return
         super().mouseReleaseEvent(e)
         # 只有真挪过才算「拖完了」。按在启动键/确认/会话行上的那些点击压根不进
-        # 这个分支(它们在 press 里就 return 了),但普通点桌面也会走到这儿——
+        # 这个分支(它们在 press 里就 return 了),但普通点工位也会走到这儿——
         # 不判断就会变成「点一下工位写一次盘」。
         start = self._press_pos
         self._press_pos = None

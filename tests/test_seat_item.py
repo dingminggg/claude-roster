@@ -78,10 +78,10 @@ def test_flash_follows_blink_half_beat(seat):
 
 
 @pytest.mark.parametrize("state,point,expect", [
-    ("down", (120, 92), "go"),          # 启动键
-    ("down", (120, 70), "picker"),      # 会话行
-    ("down", (60, 40), "seat"),         # 桌面空白 → 拖动
-    ("busy", (120, 92), "seat"),        # 运行中没有启动键
+    ("down", (40, 152), "go"),          # 桌下信息条:启动键
+    ("down", (120, 152), "picker"),     # 桌下信息条:会话行
+    ("down", (60, 40), "seat"),         # 工位本体 → 拖动
+    ("busy", (40, 152), "seat"),        # 上班了就没有启动键
     ("busy", (60, 40), "seat"),
 ])
 def test_hit_regions(seat, state, point, expect):
@@ -92,8 +92,8 @@ def test_hit_regions(seat, state, point, expect):
 def test_hit_confirm_buttons(seat):
     seat.set_run_state("down")
     seat.set_confirm(True)
-    assert seat.hit(QPointF(105, 92)) == "yes"
-    assert seat.hit(QPointF(140, 92)) == "no"
+    assert seat.hit(QPointF(30, 152)) == "yes"
+    assert seat.hit(QPointF(60, 152)) == "no"
 
 
 def test_down_seat_does_not_emit_clicked(app, seat):
@@ -144,9 +144,9 @@ def test_press_start_button_emits_and_expands_confirm(app, seat):
     got = []
     seat.start_clicked.connect(got.append)
     seat.set_run_state("down")
-    _press(seat, 120, 92)
+    _press(seat, 40, 152)
     assert got == ["fad"]
-    assert seat.hit(QPointF(105, 92)) == "yes"      # 已经是确认态
+    assert seat.hit(QPointF(30, 152)) == "yes"      # 已经是确认态
 
 
 def test_press_yes_emits_confirmed_and_collapses(app, seat):
@@ -154,9 +154,9 @@ def test_press_yes_emits_confirmed_and_collapses(app, seat):
     seat.confirmed.connect(got.append)
     seat.set_run_state("down")
     seat.set_confirm(True)
-    _press(seat, 105, 92)
+    _press(seat, 30, 152)
     assert got == ["fad"]
-    assert seat.hit(QPointF(120, 92)) == "go"       # 收回成启动键
+    assert seat.hit(QPointF(40, 152)) == "go"       # 收回成启动键
 
 
 def test_press_no_collapses_without_starting(app, seat):
@@ -164,16 +164,16 @@ def test_press_no_collapses_without_starting(app, seat):
     seat.confirmed.connect(got.append)
     seat.set_run_state("down")
     seat.set_confirm(True)
-    _press(seat, 140, 92)
+    _press(seat, 60, 152)
     assert got == []
-    assert seat.hit(QPointF(120, 92)) == "go"
+    assert seat.hit(QPointF(40, 152)) == "go"
 
 
 def test_press_picker_emits(app, seat):
     got = []
     seat.picker_clicked.connect(got.append)
     seat.set_run_state("down")
-    _press(seat, 120, 70)
+    _press(seat, 120, 152)
     assert got == ["fad"]
 
 
@@ -181,10 +181,10 @@ def test_press_speaker_emits_only_while_speaking(app, seat):
     got = []
     seat.speaker_clicked.connect(got.append)
     seat.set_run_state("busy")
-    _press(seat, 170, 30)               # 没在朗读:喇叭不存在,当点桌面
+    _press(seat, 180, 8)                # 没在朗读:喇叭不存在,当点工位
     assert got == []
     seat.set_speaking(True)
-    _press(seat, 170, 30)
+    _press(seat, 180, 8)
     assert got == ["fad"]
 
 
@@ -235,10 +235,10 @@ def test_right_click_does_not_trigger_click_or_picker(app, seat):
     assert clicks == []
 
     seat.set_run_state("down")
-    _press_button(seat, 120, 70, _Qt.MouseButton.RightButton)    # 右键点会话行
-    _press_button(seat, 120, 92, _Qt.MouseButton.RightButton)    # 右键点启动键
+    _press_button(seat, 120, 152, _Qt.MouseButton.RightButton)   # 右键点会话行
+    _press_button(seat, 40, 152, _Qt.MouseButton.RightButton)    # 右键点启动键
     assert pickers == [] and starts == []
-    assert seat.hit(QPointF(120, 92)) == "go"                    # 没被展开成确认态
+    assert seat.hit(QPointF(40, 152)) == "go"                    # 没被展开成确认态
 
 
 def test_left_click_still_works(app, seat):
