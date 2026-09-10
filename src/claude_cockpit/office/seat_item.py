@@ -243,18 +243,25 @@ class SeatItem(QGraphicsObject):
         p.setBrush(QBrush(BEZEL))
         p.drawRect(QRectF(84, 44, 10, 4))                   # 支架
         p.drawRoundedRect(QRectF(78, 47, 22, 3), 1.5, 1.5)  # 底座
-        # 桌上的小音响(显示器左边)。朗读时从它右上方冒三格音浪
+        # 桌上的小音响(显示器左边),小一点、不抢戏
         p.setBrush(QBrush(SPEAKER))
-        p.drawRoundedRect(QRectF(32, 34, 18, 24), 3, 3)
+        p.drawRoundedRect(QRectF(36, 38, 13, 18), 2.5, 2.5)
         p.setBrush(QBrush(SPEAKER_CONE))
-        p.drawEllipse(QRectF(36, 44, 10, 10))               # 低音单元
-        p.drawEllipse(QRectF(39, 38, 4, 4))                 # 高音单元
+        p.drawEllipse(QRectF(38.5, 45, 8, 8))               # 低音单元
+        p.drawEllipse(QRectF(41, 40.5, 3, 3))               # 高音单元
         if up and self._speaking:
-            # 三根竖条轮流窜高,像音量表在跳
-            heights = ((8, 14, 10), (13, 6, 16), (9, 17, 7))[self._wave]
-            p.setBrush(QBrush(WAVE))
-            for i, h in enumerate(heights):
-                p.drawRoundedRect(QRectF(53 + i * 5, 52 - h, 3.4, h), 1.6, 1.6)
+            # 音浪:从音响往**左右两侧**一圈圈扩散,越远越淡(比竖条音量表更像声音)
+            cx, cy = 42.5, 47.0
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            for i in range(3):
+                r = 9 + i * 6 + self._wave * 2       # 相位推着往外走
+                c = QColor(WAVE)
+                c.setAlpha(max(0, 190 - i * 55 - self._wave * 20))
+                p.setPen(QPen(c, 1.8))
+                box = QRectF(cx - r, cy - r, r * 2, r * 2)
+                p.drawArc(box, -50 * 16, 100 * 16)          # 右half的一段弧
+                p.drawArc(box, 130 * 16, 100 * 16)          # 左half的一段弧
+            p.setPen(Qt.PenStyle.NoPen)
 
         p.setBrush(QBrush(MUG))
         p.drawRoundedRect(QRectF(124, 44, 11, 11), 3, 3)    # 杯子
@@ -296,6 +303,17 @@ class SeatItem(QGraphicsObject):
         p.drawRoundedRect(QRectF(82, 102, 36, 20), 7, 7)    # 椅背中间那块软垫
         p.setBrush(QBrush(CHAIR_DARK))
         p.drawRect(QRectF(98, 128, 4, 8))                   # 气杆
+        # 五爪脚 + 轮子:光一根气杆看着像浮着,有腿才坐得住。
+        # 用「从中心辐射的线」画,别用横条——横条排出来像把扇子。
+        hub = QPointF(100, 135)
+        p.setPen(QPen(CHAIR_DARK, 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        feet = ((-21, 6), (-11, 10), (0, 12), (11, 10), (21, 6))
+        for dx, dy in feet:
+            p.drawLine(hub, QPointF(hub.x() + dx, hub.y() + dy))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(CHAIR_DARK))
+        for dx, dy in feet:
+            p.drawEllipse(QRectF(hub.x() + dx - 2.2, hub.y() + dy - 1.6, 4.4, 4.4))
 
         # 名字:工位最上面一行
         p.setFont(FONT_NAME)
