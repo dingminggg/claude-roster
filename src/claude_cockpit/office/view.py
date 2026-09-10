@@ -103,7 +103,6 @@ class OfficeWindow(QMainWindow):
         self.seats: dict[str, SeatItem] = {}
         self.areas: dict[str, DeptAreaItem] = {}
         self._sessions: dict[str, list] = {}
-        self._picked: dict[str, str | None] = {}
         self._addrs: dict[str, str | None] = {}
         self._canvas = _Canvas(self.scene, self._zoom_by)
         self.setCentralWidget(self._canvas)
@@ -126,7 +125,6 @@ class OfficeWindow(QMainWindow):
         # 会话地址和选中会话,直到下一个 tick 才被盖掉
         live = {m.name for m in self._members}
         self._sessions = {k: v for k, v in self._sessions.items() if k in live}
-        self._picked = {k: v for k, v in self._picked.items() if k in live}
         self._addrs = {k: v for k, v in self._addrs.items() if k in live}
         raw = settings.load().get("office") or {}
         lay = layout_mod.ensure(layout_mod.parse(raw), self._members)
@@ -144,8 +142,6 @@ class OfficeWindow(QMainWindow):
             sx, sy = lay.seats[m.name]
             seat.setPos(sx, sy)
             seat.clicked.connect(self.member_clicked.emit)
-            seat.confirmed.connect(self._on_confirmed)
-            seat.picker_clicked.connect(self._on_picker)
             seat.speaker_clicked.connect(self.stop_speaking_requested.emit)
             seat.moved.connect(lambda _n: self._queue_save())
             self.seats[m.name] = seat
@@ -215,7 +211,6 @@ class OfficeWindow(QMainWindow):
         """灌该成员的历史会话;默认选中最近一条(列表首项)。"""
         items = list(sessions or [])
         self._sessions[name] = items
-        self._picked[name] = items[0].id if items else None
         seat = self.seats.get(name)
         if seat is not None:
             seat.set_subtitle(_session_label(items[0]) if items else "新会话")
@@ -247,8 +242,39 @@ class OfficeWindow(QMainWindow):
 
     # ---------- 右键菜单 ----------
     def build_menu(self, name: str) -> QMenu:
-        """单独成方法(不在 contextMenuEvent 里现搭):exec 阻塞,不抽出来没法单测。"""
+        """工位的右键菜单。**所有操作都在这儿**——工位上不放按钮(那样画面才干净)。
+
+        单独成方法(不在 contextMenuEvent 里现搭):exec 阻塞,不抽出来没法单测。
+        """
         menu = QMenu(self)
+        seat = self.seats.get(name)
+        sessions = self._sessions.get(name) or []
+
+        if seat is not None and not seat.is_up():
+            # 没上班:菜单第一档就是启动。选哪条会话由子菜单点明,
+            # 「点一下就开」本身已经是个明确动作,不再另做内联确认。
+            menu.addAction("启动(新会话)").triggered.connect(
+                lambda: self.start_requested.emit(name, None))
+            if sessions:
+                # 子菜单显式建、显式挂在父菜单上:用 menu.addMenu("标题") 的话
+                # 返回的 QMenu 在 Python 侧没人持有,会被回收掉(C++ 侧就没了)
+                sub = QMenu("续接会话", menu)
+                for sess in sessions:
+                    act = sub.addAction(_session_label(sess))
+                    act.triggered.connect(
+                        lambda _=False, sid=sess.id:
+                        self.start_requested.emit(name, sid))
+                menu.addMenu(sub)
+                rm = QMenu("删除会话记录", menu)
+                for sess in sessions:
+                    act = rm.addAction(_session_label(sess))
+                    act.triggered.connect(
+                        lambda _=False, sid=sess.id:
+                        self.delete_session_requested.emit(name, sid))
+                menu.addMenu(rm)
+                menu._submenus = (sub, rm)      # 防回收
+            menu.addSeparator()
+
         addr = self._addrs.get(name)
         copy = menu.addAction("复制会话地址")
         if addr:
@@ -279,31 +305,6 @@ class OfficeWindow(QMainWindow):
         menu.exec(e.globalPos())
 
     # ---------- 内部 ----------
-    def _on_confirmed(self, name: str) -> None:
-        self.start_requested.emit(name, self._picked.get(name))
-
-    def _on_picker(self, name: str) -> None:
-        """会话下拉:选一条 / 新会话 / 删一条。"""
-        items = self._sessions.get(name) or []
-        menu = QMenu(self)
-        new = menu.addAction("新会话")
-        new.triggered.connect(lambda: self._pick(name, None, "新会话"))
-        for s in items:
-            title = _session_label(s)
-            act = menu.addAction(title)
-            act.triggered.connect(
-                lambda _=False, sid=s.id, t=title: self._pick(name, sid, t))
-            rm = menu.addAction(f"  删除「{title}」")
-            rm.triggered.connect(
-                lambda _=False, sid=s.id:
-                self.delete_session_requested.emit(name, sid))
-        menu.exec(self._canvas.mapToGlobal(
-            self._canvas.mapFromScene(self.seats[name].scenePos())))
-
-    def _pick(self, name: str, sid: str | None, title: str) -> None:
-        self._picked[name] = sid
-        self.seats[name].set_subtitle(title)
-
     def _zoom_by(self, factor: float) -> None:
         self._apply_zoom(self.zoom * factor)
         self._queue_save()

@@ -75,20 +75,8 @@ def test_seat_click_is_forwarded_as_member_clicked(win):
     assert got == ["fad"]
 
 
-def test_confirm_emits_start_requested_with_selected_session(win):
-    got = []
-    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
-    win.set_sessions("fad", [Session(id="s1", title="上次那条", mtime=1.0)])
-    win.seats["fad"].confirmed.emit("fad")
-    assert got == [("fad", "s1")]
 
 
-def test_confirm_without_session_passes_none(win):
-    got = []
-    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
-    win.set_sessions("fad", [])
-    win.seats["fad"].confirmed.emit("fad")
-    assert got == [("fad", None)]
 
 
 def test_menu_copy_address_disabled_not_hidden(win):
@@ -229,14 +217,6 @@ def test_session_row_shows_title_and_untitled_fallback(win):
     assert "补单测" in win.seats["fad"]._sub
 
 
-def test_picker_menu_built_from_real_sessions(win, app):
-    """会话下拉能用真 Session 建出来:选一条 → start_requested 带那条的 id。"""
-    win.set_sessions("fad", [Session(id="s-new", title="新的那条", mtime=2.0),
-                             Session(id="s-old", title="旧的那条", mtime=1.0)])
-    got = []
-    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
-    win.seats["fad"].confirmed.emit("fad")
-    assert got == [("fad", "s-new")]        # 默认选中最近一条
 
 
 def test_refit_scene_keeps_camera_put(win, app):
@@ -257,3 +237,51 @@ def test_refit_scene_keeps_camera_put(win, app):
     app.processEvents()
     after = center()
     assert (after - before).manhattanLength() < 20
+
+
+def _menu_items(menu):
+    return [a.text() for a in menu.actions()]
+
+
+def test_menu_of_down_seat_can_start_new_session(win):
+    """没上班的工位:菜单第一档就是启动,点「新会话」传 None。"""
+    win.set_run_state("fad", "down")
+    got = []
+    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
+    menu = win.build_menu("fad")
+    act = next(a for a in menu.actions() if "启动(新会话)" in a.text())
+    act.trigger()
+    assert got == [("fad", None)]
+
+
+def test_menu_of_down_seat_lists_sessions_to_resume(win):
+    """有历史会话时多一个「续接会话」子菜单,点某条就带它的 id 启动。"""
+    win.set_run_state("fad", "down")
+    win.set_sessions("fad", [Session(id="s-new", title="新的那条", mtime=2.0),
+                             Session(id="s-old", title="旧的那条", mtime=1.0)])
+    got = []
+    win.start_requested.connect(lambda n, sid: got.append((n, sid)))
+    menu = win.build_menu("fad")     # 父菜单要留个引用:被回收会连带删掉子菜单
+    sub = next(a.menu() for a in menu.actions() if a.text() == "续接会话")
+    assert [a.text() for a in sub.actions()] == ["新的那条", "旧的那条"]
+    sub.actions()[1].trigger()
+    assert got == [("fad", "s-old")]
+
+
+def test_menu_can_delete_a_session_record(win):
+    win.set_run_state("fad", "down")
+    win.set_sessions("fad", [Session(id="s1", title="要删的", mtime=1.0)])
+    got = []
+    win.delete_session_requested.connect(lambda n, sid: got.append((n, sid)))
+    menu = win.build_menu("fad")     # 同上:父菜单不留引用,子菜单会被一起回收
+    sub = next(a.menu() for a in menu.actions() if a.text() == "删除会话记录")
+    sub.actions()[0].trigger()
+    assert got == [("fad", "s1")]
+
+
+def test_menu_of_running_seat_has_no_start(win):
+    """已经在跑的成员不该再出现启动项——重复启动是历史 bug 的来源。"""
+    win.set_run_state("fad", "busy")
+    texts = _menu_items(win.build_menu("fad"))
+    assert not any("启动" in t for t in texts)
+    assert "复制会话地址" in texts and "打开目录" in texts

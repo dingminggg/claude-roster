@@ -77,23 +77,6 @@ def test_flash_follows_blink_half_beat(seat):
     assert seat.is_flashing()
 
 
-@pytest.mark.parametrize("state,point,expect", [
-    ("down", (40, 152), "go"),          # 桌下信息条:启动键
-    ("down", (120, 152), "picker"),     # 桌下信息条:会话行
-    ("down", (60, 40), "seat"),         # 工位本体 → 拖动
-    ("busy", (40, 152), "seat"),        # 上班了就没有启动键
-    ("busy", (60, 40), "seat"),
-])
-def test_hit_regions(seat, state, point, expect):
-    seat.set_run_state(state)
-    assert seat.hit(QPointF(*point)) == expect
-
-
-def test_hit_confirm_buttons(seat):
-    seat.set_run_state("down")
-    seat.set_confirm(True)
-    assert seat.hit(QPointF(30, 152)) == "yes"
-    assert seat.hit(QPointF(60, 152)) == "no"
 
 
 def test_down_seat_does_not_emit_clicked(app, seat):
@@ -139,42 +122,13 @@ def _press(seat, x, y):
     seat.mousePressEvent(ev)
 
 
-def test_press_start_button_emits_and_expands_confirm(app, seat):
-    """点启动键:发 start_clicked 且原地展开成 ✓/✕(不弹窗)。"""
-    got = []
-    seat.start_clicked.connect(got.append)
-    seat.set_run_state("down")
-    _press(seat, 40, 152)
-    assert got == ["fad"]
-    assert seat.hit(QPointF(30, 152)) == "yes"      # 已经是确认态
 
 
-def test_press_yes_emits_confirmed_and_collapses(app, seat):
-    got = []
-    seat.confirmed.connect(got.append)
-    seat.set_run_state("down")
-    seat.set_confirm(True)
-    _press(seat, 30, 152)
-    assert got == ["fad"]
-    assert seat.hit(QPointF(40, 152)) == "go"       # 收回成启动键
 
 
-def test_press_no_collapses_without_starting(app, seat):
-    got = []
-    seat.confirmed.connect(got.append)
-    seat.set_run_state("down")
-    seat.set_confirm(True)
-    _press(seat, 60, 152)
-    assert got == []
-    assert seat.hit(QPointF(40, 152)) == "go"
 
 
-def test_press_picker_emits(app, seat):
-    got = []
-    seat.picker_clicked.connect(got.append)
-    seat.set_run_state("down")
-    _press(seat, 120, 152)
-    assert got == ["fad"]
+
 
 
 def test_press_speaker_emits_only_while_speaking(app, seat):
@@ -222,23 +176,6 @@ def _press_button(seat, x, y, button):
     return ev
 
 
-def test_right_click_does_not_trigger_click_or_picker(app, seat):
-    """右键只该弹菜单:不许顺带把控制台最大化,也不许弹会话下拉。"""
-    from PySide6.QtCore import Qt as _Qt
-    clicks, pickers, starts = [], [], []
-    seat.clicked.connect(clicks.append)
-    seat.picker_clicked.connect(pickers.append)
-    seat.start_clicked.connect(starts.append)
-
-    seat.set_run_state("busy")
-    _press_button(seat, 60, 40, _Qt.MouseButton.RightButton)     # 右键点桌面
-    assert clicks == []
-
-    seat.set_run_state("down")
-    _press_button(seat, 120, 152, _Qt.MouseButton.RightButton)   # 右键点会话行
-    _press_button(seat, 40, 152, _Qt.MouseButton.RightButton)    # 右键点启动键
-    assert pickers == [] and starts == []
-    assert seat.hit(QPointF(40, 152)) == "go"                    # 没被展开成确认态
 
 
 def test_left_click_still_works(app, seat):
@@ -249,3 +186,28 @@ def test_left_click_still_works(app, seat):
     seat.set_run_state("busy")
     _press_button(seat, 60, 40, _Qt.MouseButton.LeftButton)
     assert clicks == ["fad"]
+
+
+def test_hit_only_knows_speaker_and_seat(app, seat):
+    """工位上只剩朗读小喇叭可点:启动、选会话都搬到右键菜单了,
+    别处一律当「点工位」(否则拖动会被按钮吃掉)。"""
+    seat.set_run_state("busy")
+    assert seat.hit(QPointF(100, 100)) == "seat"
+    assert seat.hit(QPointF(40, 150)) == "seat"     # 以前这儿是启动键
+    assert seat.hit(QPointF(180, 8)) == "seat"      # 没在朗读,喇叭不存在
+    seat.set_speaking(True)
+    assert seat.hit(QPointF(180, 8)) == "speaker"
+
+
+def test_right_click_does_not_maximize(app, seat):
+    """右键只该弹菜单,不许顺带把控制台弹到眼前。"""
+    from PySide6.QtCore import QEvent, Qt as _Qt
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+    got = []
+    seat.clicked.connect(got.append)
+    seat.set_run_state("busy")
+    ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    ev.setPos(QPointF(100, 100))
+    ev.setButton(_Qt.MouseButton.RightButton)
+    seat.mousePressEvent(ev)
+    assert got == []
