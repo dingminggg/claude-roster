@@ -7,11 +7,48 @@
 """
 from __future__ import annotations
 
+import os
 import subprocess
+from typing import Mapping
 
 from .config import Member
 
 TITLE_PREFIX = "CCKPT:"
+
+# claude 给自己拉起的 shell 设这个标记;在带标记的环境里启动的 claude 会把自己当嵌套子会话,
+# 关闭 transcript 保存(无法 --resume、面板会话下拉列不到)。cockpit 若曾从某个 Claude 会话里
+# 被启动就会继承它,再经 Popen 透传给每个成员窗口——所以启动前必须剔掉。
+CHILD_SESSION_MARKER = "CLAUDE_CODE_CHILD_SESSION"
+
+# 除了上面那个,「我正跑在某个 Claude Code 会话里」这件事还由一整族变量宣告。
+# cockpit 若从某个 Claude 会话里被启动就会继承它们,再透传给成员窗口——里层
+# claude 于是把自己当成嵌套在别人里面跑,渲染降级(界面近乎黑白,踩过)。
+# 成员是**各自独立的顶层会话**,父会话的身份标记一个都不该带进去。
+# 按前缀剔除而不是列白名单:这族变量以后还会加,漏一个又是一次同样的坑。
+PARENT_SESSION_PREFIXES = ("CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_PID",
+                           "CLAUDE_EFFORT")
+
+
+def child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """返回给成员 claude 用的环境:复制 base(默认 os.environ),剔除父会话的身份标记。
+    不改动入参;除了那族标记,其他变量原样透传。
+
+    还有一个 `NO_COLOR`:Claude Code 会给自己拉起的子进程注入它(让工具输出干净)。
+    cockpit 若从某个 Claude 会话里被启动就会继承,再传给成员窗口——里层 claude
+    于是一律不上色,界面纯黑白(踩过,而且换主题完全救不回来:NO_COLOR 一句话全禁)。
+    **只在确认自己跑在 Claude 会话里时才剔它**:用户自己设的 NO_COLOR 是明确偏好,
+    不该被我们悄悄抹掉。
+    """
+    src = os.environ if base is None else base
+    env = dict(src)
+    launched_by_claude = any(k in src for k in ("CLAUDECODE", CHILD_SESSION_MARKER,
+                                                "CLAUDE_CODE_ENTRYPOINT"))
+    env.pop(CHILD_SESSION_MARKER, None)
+    for k in [k for k in env if k.startswith(PARENT_SESSION_PREFIXES)]:
+        env.pop(k, None)
+    if launched_by_claude:
+        env.pop("NO_COLOR", None)
+    return env
 
 
 def window_title(m: Member) -> str:
@@ -49,8 +86,10 @@ def build_inner_command(m: Member, session_id: str | None = None) -> str:
 def launch(m: Member, session_id: str | None = None) -> None:
     """真正拉起控制台:用 CREATE_NEW_CONSOLE 让子进程自带一个新控制台窗口
     (不走 `start`,避免嵌套引号被 cmd 拆坏)。已存在同标题窗口由调用方先判重。
-    session_id 透传给 build_inner_command 决定是否 --resume。"""
+    session_id 透传给 build_inner_command 决定是否 --resume。
+    env=child_env() 剔除继承的子会话标记,保证成员 claude 是正常顶层会话。"""
     subprocess.Popen(
         f"cmd /k {build_inner_command(m, session_id)}",
         creationflags=subprocess.CREATE_NEW_CONSOLE,
+        env=child_env(),
     )
