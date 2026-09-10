@@ -11,47 +11,56 @@ agents:
   emoji: 🏪
   color: '#e74c3c'
   permission_mode: plan
+  dept: 服务端
 - name: fad-2
   cwd: C:\Users\LQ\PhpstormProjects\fad-backend-2
   emoji: 📊
   color: '#72a89e'
   permission_mode: default
+  dept: 服务端
 - name: fad-3
   cwd: C:\Users\LQ\PhpstormProjects\fad-backend-3
   emoji: 🏬
   color: '#93aba6'
   permission_mode: default
+  dept: 服务端
 - name: customer
   cwd: C:\Users\LQ\PhpstormProjects\foodsup-client
   emoji: 🙋
   color: '#609ceb'
   permission_mode: plan
+  dept: 客户端
 - name: customer-web
   cwd: C:\Users\LQ\PhpstormProjects\foodsup-client-web
   emoji: 👨‍🍳
   color: '#3b82f6'
   permission_mode: default
   model: opus
+  dept: 客户端
 - name: driver
   cwd: C:\Users\LQ\PhpstormProjects\foodsup-driver
   emoji: 🚚
   color: '#2ecc71'
   permission_mode: acceptEdits
+  dept: 司机端
 - name: driver-web
   cwd: C:\Users\LQ\PhpstormProjects\foodsup-driver-web
   emoji: 🚑
   color: '#3b82f6'
   permission_mode: default
+  dept: 司机端
 - name: one-time
   cwd: C:\Users\LQ\PhpstormProjects\one-time-test
   emoji: 🤖
   color: '#3b82f6'
   permission_mode: default
+  dept: 后勤
 - name: pq
   cwd: C:\Users\LQ\PhpstormProjects\pq-backend
   emoji: 🤖
   color: '#3b82f6'
   permission_mode: default
+  dept: 服务端
 - name: diy-bot
   cwd: C:\Users\LQ\PhpstormProjects\diy-bot
   emoji: 🤖
@@ -62,8 +71,10 @@ agents:
   emoji: 🤖
   color: '#3b82f6'
   permission_mode: default
+  dept: 服务端
 - name: frog
   cwd: C:\Users\LQ\PhpstormProjects\desk-buddy
   emoji: 🤖
   color: '#3b82f6'
   permission_mode: default
+  dept: 后勤
