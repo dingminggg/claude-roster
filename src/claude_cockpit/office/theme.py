@@ -1,11 +1,14 @@
 """办公室画布的配色。**改颜色只改这一个文件**,别再散回各个图元里。
 
-「白模」风:整个场景近乎全白(桌椅、地面都是浅灰白),**颜色只留给两样**——
-亮起来的屏幕(= 运行状态)和坐在椅子上的人(= 成员配色)。这样一眼扫过去,
-跳出来的就是「谁在干活、谁是谁」,而不是一堆装饰。
+**家具用低饱和的木色和石板色**(浅木桌 + 深灰蓝椅),地面和地毯仍是浅灰白。
+之前家具也是近乎全白,结果椅子 `#e8eaee` 和地毯 `#e9ecf1` 几乎同一个明度——
+字面意义上消失在地毯里,整个工位读起来是「一团浅灰 + 一块彩色屏幕在飘」。
 
-层次从底到顶一层比一层亮:
-    画布 CANVAS → 地毯 CARPET → 桌面 DESK_TOP
+**饱和色仍然只给两样**:亮起来的屏幕(= 运行状态)和小人(= 成员配色)。家具是
+低饱和土色,和状态色(蓝/绿/琥珀)不在同一个饱和度档上,所以不抢戏——一眼扫过去
+跳出来的还是「谁在干活、谁是谁」。
+
+对比度是**对着地毯**调的,不是对着画布:工位坐在地毯上,和地毯分不开就白搭。
 """
 from __future__ import annotations
 
@@ -28,22 +31,34 @@ CARPET_EDGE = QColor("#cfd5de")     # 虚线边
 CARPET_LABEL = QColor("#6b7280")    # 部门名
 GRIP = QColor("#9aa3b0")            # 右下角拉伸角
 
-# ---------- 家具(白模) ----------
-DESK_TOP = QColor("#f1f2f4")        # 桌面
-DESK_FRONT = QColor("#e2e4e8")      # 桌子前沿(看得见的板厚)
-DESK_LEG = QColor("#dcdee3")
-DESK_TOP_OFF = QColor("#ebecee")    # 没人时:再冷一档,和有人的桌子拉开
-DESK_FRONT_OFF = QColor("#dedfe2")
-CHAIR = QColor("#e8eaee")           # 座垫
-CHAIR_DARK = QColor("#d7dae0")      # 椅背 / 气杆
-MUG = QColor("#dfe2e7")             # 桌上的杯子
+# ---------- 家具 ----------
+# 桌子:浅木。三档明度分出「桌面 / 板厚 / 桌腿」,不然等距的盒子看不出是个盒子。
+DESK_TOP = QColor("#e6cba6")        # 桌面
+DESK_FRONT = QColor("#d2b184")      # 桌子前沿(看得见的板厚)
+DESK_LEG = QColor("#c39f71")
+DESK_SHADE = QColor("#b18a5c")      # 桌子底下背光的板面(侧板腿 / 抽屉柜)
+DRAWER_LINE = QColor("#94713f")     # 抽屉缝
+# 工位后面那道低屏风(灰蓝布)。**这是「工位 vs 餐桌」最强的信号**——
+# 光是一块板 + 四条细腿,画出来就是张餐桌。
+PARTITION = QColor("#bac2d0")
+PARTITION_TOP = QColor("#dae0e8")
+DESK_TOP_OFF = QColor("#dcd7d0")    # 没人时:抽掉木色的暖,褪成灰木
+DESK_FRONT_OFF = QColor("#c8c2ba")
+# 椅子:深灰蓝(参考图那把转椅)。比显示器边框浅一档——屏幕边框得是全场最深的。
+CHAIR = QColor("#6f7b8d")           # 座垫 / 椅背中间那块软垫
+CHAIR_DARK = QColor("#57616f")      # 椅背
+CHAIR_LEG = QColor("#8d97a5")       # 五爪底盘:比椅背浅,压在地毯上才看得见
+MUG = QColor("#f4f6f8")             # 桌上的杯子:白瓷,压在木色上才跳
+KEYBOARD = QColor("#525b6a")        # 键盘 / 鼠标:深灰,压在木色桌面上才看得见
+KEY = QColor("#6f7889")             # 键盘上那几道键位
 PAPER = QColor("#fdfdfe")           # 桌上那叠文件(一张 = 一条历史会话)
-PAPER_LINE = QColor("#c9ced8")      # 纸上那两条「字」
-PAPER_EDGE = QColor("#b9c0cb")      # 纸的边:白纸压白桌,不勾边看不出来
+PAPER_LINE = QColor("#bcc3cf")      # 纸上那两条「字」
+PAPER_EDGE = QColor("#c7b393")      # 纸的边:偏木色的暖灰,别用冷灰(压在木桌上会脏)
 
 # ---------- 桌上的小音响 ----------
 SPEAKER = QColor("#3b424c")         # 箱体
-SPEAKER_CONE = QColor("#6b7480")    # 喇叭单元
+SPEAKER_CONE = QColor("#6b7480")    # 喇叭单元 / 顶面
+SPEAKER_SIDE = QColor("#2f353d")    # 右前那个侧面:比正面深一档,盒子才立得起来
 WAVE = QColor("#f59e0b")            # 音浪:琥珀色,和状态色(蓝/绿)不撞
 
 # ---------- 电脑 ----------

@@ -137,10 +137,10 @@ def test_press_speaker_emits_only_while_speaking(app, seat):
     got = []
     seat.speaker_clicked.connect(got.append)
     seat.set_run_state("busy")
-    _press(seat, 40, 44)                # 没在朗读:音响只是摆设,当点工位
+    _press(seat, 59, 26)                # 没在朗读:音响只是摆设,当点工位
     assert got == []
     seat.set_speaking(True)
-    _press(seat, 40, 44)
+    _press(seat, 59, 26)
     assert got == ["fad"]
 
 
@@ -193,9 +193,9 @@ def test_left_click_still_works(app, seat):
 def test_hit_regions_are_semantic(app, seat):
     """命中区是有语义的:点人 = 管上下班,点文件 = 管会话历史,其余 = 点工位。"""
     seat.set_run_state("busy")
-    assert seat.hit(QPointF(100, 100)) == "person"   # 椅子上的人
+    assert seat.hit(QPointF(42, 80)) == "person"   # 椅子上的人
     assert seat.hit(QPointF(40, 150)) == "seat"      # 桌腿旁边的空地
-    at_speaker = QPointF(40, 44)                     # 桌上那个小音响
+    at_speaker = QPointF(59, 26)                     # 桌上那个小音响
     assert seat.hit(at_speaker) == "seat"            # 没在朗读:它只是个摆设
     seat.set_speaking(True)
     assert seat.hit(at_speaker) == "speaker"
@@ -204,7 +204,7 @@ def test_hit_regions_are_semantic(app, seat):
 def test_files_only_exist_when_there_are_sessions(app, seat):
     """没有历史会话就没有那叠文件,那块地方当普通桌面。"""
     seat.set_run_state("down")
-    at_files = QPointF(150, 44)
+    at_files = QPointF(120, 83)
     assert seat.hit(at_files) == "seat"
     seat.set_session_count(3)
     assert seat.hit(at_files) == "files"

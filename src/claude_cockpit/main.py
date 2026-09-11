@@ -434,6 +434,25 @@ def main() -> int:
 
     panel.stop_requested.connect(on_stop)
 
+    def _dispatch_messages(members) -> None:
+        """把「谁给谁发了消息」变成画布上跑腿的小人。
+
+        hook 记下来的收件人是**会话名**(fad-backend-2-f3),不是成员名(fad-2),
+        所以要经 cur_peers 反查一遍;发件人那头给的是 cwd,按老口径 match 到成员。
+        对不上(对方不在花名册里 / 会话没探到)就安静丢掉——这只是个锦上添花的动画,
+        不能因为它出岔子影响正事。
+        """
+        msgs = cc_signals.take_messages()
+        if not msgs:
+            return
+        by_cwd = {norm_path(m.cwd): m.name for m in members}
+        by_session = {p.name: name for name, p in cur_peers.items()}
+        for rec in msgs:
+            src = by_cwd.get(norm_path(str(rec.get("from_cwd") or "")))
+            dst = by_session.get(str(rec.get("to_name") or ""))
+            if src and dst:
+                panel.send_walker(src, dst)
+
     def tick() -> None:
         # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄
         dead = [n for n, h in hwnds.items() if not winman.is_window(h)]
@@ -489,6 +508,7 @@ def main() -> int:
         for m in members:
             p = cur_peers.get(m.name)
             panel.set_address(m.name, p.name if p is not None else None)
+        _dispatch_messages(members)         # 会话之间发了消息 → 小人跑一趟
         # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
         _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
         # 名字下面那行:用缓存的活句柄直接读控制台标题(claude 起来后会改成它的状态)

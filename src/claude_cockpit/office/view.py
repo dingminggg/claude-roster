@@ -11,16 +11,18 @@ set_order 是空操作:画布上的位置由用户自己摆,排序没有意义�
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsView, QInputDialog, QMainWindow, QMenu,
 )
 
 from .. import layout as layout_mod
+from ..layout import GAP
 from .. import settings
 from .dept_area import DeptAreaItem
 from .seat_item import SeatItem
+from .walker_item import WalkerItem
 from . import theme
 from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 
@@ -115,13 +117,20 @@ class OfficeWindow(QMainWindow):
         self._extra_depts: set[str] = set()   # 用户手工建的地毯(可能还没人)
         self._always_on_top = False      # 与 set_always_on_top 的「值没变就不动」对齐
         self._framed = False             # 镜头是否已对准过办公室(只在首次装配时对)
+        self._walkers: list[WalkerItem] = []   # 正在跑腿送信的小人
+        self._away: dict[str, int] = {}       # 谁离座了(同一个人可能连送几趟)
         self.rebuild(members)
 
     # ---------- 装配 ----------
     def rebuild(self, members) -> None:
-        self.scene.clear()
+        # **先清名单、再 clear 场景**:scene.clear() 会删掉 walker,触发它的 destroyed
+        # 回调,那个回调会回头找发送方工位——这时 seats 里还挂着已经被删掉的 C++ 对象,
+        # 一碰就 RuntimeError(踩过)。
         self.seats.clear()
         self.areas.clear()
+        self._walkers.clear()
+        self._away.clear()
+        self.scene.clear()
         self._members = list(members)
         # 成员删掉后,它的会话/地址不清掉会一直留着:同名重建时会显示上一个人的
         # 会话地址和选中会话,直到下一个 tick 才被盖掉
@@ -331,6 +340,74 @@ class OfficeWindow(QMainWindow):
         self._blink_on = not self._blink_on
         for seat in self.seats.values():
             seat.set_blink(self._blink_on)
+
+    # ---------- 送信的小人 ----------
+    MAX_WALKERS = 4          # 同时最多几个在跑:再多就是一屋子人乱窜,反而看不出谁找谁
+
+    def send_walker(self, from_name: str, to_name: str) -> bool:
+        """`from_name` 给 `to_name` 发了消息 → 放一个小人走过去说一句再走回来。
+
+        两头都得是画布上**认得的**成员;自己给自己发不演(那是 SendMessage 到自己,
+        画出来是原地抖一下,没意义)。
+        """
+        a, b = self.seats.get(from_name), self.seats.get(to_name)
+        if a is None or b is None or a is b:
+            return False
+        if len(self._walkers) >= self.MAX_WALKERS:
+            return False
+        w = WalkerItem(a.color, self._walk_path(a, b))
+        self.scene.addItem(w)
+        self._walkers.append(w)
+        self._away[from_name] = self._away.get(from_name, 0) + 1
+        a.set_away(True)                    # 人走了,工位上那把椅子空着
+        w.destroyed.connect(lambda *_: self._drop_walker(w, from_name))
+        return True
+
+    @staticmethod
+    def _lane_y(seat) -> float:
+        """工位前面那条过道的 y:工位包围盒下沿再往前半个间距。
+
+        工位的下半截是空地(桌子在上半截),所以从椅子**往下**走一定不会穿过桌子;
+        走到这条线上再横着走,就是沿着过道走。
+        """
+        return seat.mapToScene(seat.boundingRect()).boundingRect().bottom() + GAP / 2
+
+    def _walk_path(self, a, b) -> list[QPointF]:
+        """排一条不穿桌子的路线:退到本工位前的过道 → 沿过道横着走 → 拐进对方工位。
+
+        两头不在同一排时,竖着那一段走在对方那一列上——中间要是正好还坐着别人,
+        会从人家工位边上蹭过去。这只是个装饰动画,不值得为此做真的寻路。
+        """
+        start = a.mapToScene(a.chair_pos())
+        # 落点偏到对方椅子左前方一点:直接站在人家椅子上太挤,也会把对方盖住
+        end = b.mapToScene(b.chair_pos() + QPointF(-26, 10))
+        lane_a, lane_b = self._lane_y(a), self._lane_y(b)
+        path = [start, QPointF(start.x(), lane_a)]
+        if abs(lane_a - lane_b) > 1:            # 不在同一排:先横着到对方那一列,再竖着换排
+            path.append(QPointF(end.x(), lane_a))
+            path.append(QPointF(end.x(), lane_b))
+        else:
+            path.append(QPointF(end.x(), lane_a))
+        path.append(end)
+        return path
+
+    def _drop_walker(self, w, from_name: str) -> None:
+        try:
+            self._walkers.remove(w)
+        except ValueError:
+            pass
+        # 连送几趟时按计数回座,不能第一趟回来就把人画回去(那会和还在路上的那个撞)
+        n = self._away.get(from_name, 0) - 1
+        if n > 0:
+            self._away[from_name] = n
+            return
+        self._away.pop(from_name, None)
+        seat = self.seats.get(from_name)
+        if seat is not None:
+            try:
+                seat.set_away(False)
+            except RuntimeError:
+                pass        # 面板正在拆(工位的 C++ 对象已经删了),回不回座都无所谓了
 
     # ---------- 右键菜单 ----------
     def build_menu(self, name: str, where: str = "seat") -> QMenu:

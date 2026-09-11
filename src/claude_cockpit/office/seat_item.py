@@ -1,11 +1,11 @@
-"""一个工位 = 一个成员的控制台。3/4 斜视画法,从**人的背后**看过去:
+"""一个工位 = 一个成员的控制台。**等距(isometric)**画法,镜头在右前方高处:
 
-    名字 → 桌子(梯形桌面 + 前沿板厚 + 两条腿)→ 显示器(屏幕朝下,正对着座位)
-         → 椅子和人(在桌子前面,我们看到的是后脑勺和椅背)→ 底部一行状态
+    名字 → 桌子(菱形桌面 + 两条前沿板厚 + 四条竖腿)→ 桌上的显示器/音响/杯子/文件
+         → 椅子和人(在桌子左前方,面朝桌子,所以看到的是后脑勺和椅背)
 
-人坐桌子前、屏幕对着人,这个朝向才对;之前把人摆在桌子后面,等于让他盯着显示器
-背面,看着别扭。**颜色只给两样**:屏幕(=运行状态)和人(=成员配色),其余全是
-白模,场景才不花。没上班就是**空椅子 + 黑屏**。
+所有家具都摆在一套房间坐标里(见 _pt / _on),投影出来自然是同一个朝向——之前每个
+图元各画各的角度,凑出来是张「立面图」,看着生硬。**颜色只给两样**:屏幕(=运行
+状态)和人(=成员配色),其余全是白模,场景才不花。没上班就是**空椅子 + 黑屏**。
 
 **工位上没有任何按钮**:启动、选会话、复制地址那些全在右键菜单里(见 view.py)。
 工位本身只有两件事——左键点它把控制台弹到眼前,拖它换位置。
@@ -17,14 +17,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (
+    QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF, QTransform,
+)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from ..layout import SEAT_H, SEAT_W
+from . import person
+from .iso import DESK_X, DESK_Y, ISO_FX, ISO_FY, ISO_TEXT_FX, ISO_TOP
+from .iso import on as _on
+from .iso import pt as _pt
+from .iso import quad as _quad
 from .theme import (
     BEZEL, CHAIR, CHAIR_DARK, DESK_FRONT, DESK_FRONT_OFF, DESK_LEG, DESK_TOP,
-    DESK_TOP_OFF, DIM, HEAD, MUG, NO_BG, NO_FG, OFF_OPACITY, SCREEN_OFF,
-    PAPER, PAPER_EDGE, PAPER_LINE, SHADOW, SPEAKER, SPEAKER_CONE, WAVE, SHADOW_HARD, TXT, YES_BG, YES_FG,
+    CHAIR_LEG, DESK_SHADE, DESK_TOP_OFF, DIM, DRAWER_LINE, KEY, KEYBOARD, MUG, NO_BG, NO_FG,
+    OFF_OPACITY, PARTITION, PARTITION_TOP, SCREEN_OFF,
+    PAPER, PAPER_EDGE, PAPER_LINE, SHADOW, SPEAKER, SPEAKER_CONE, SPEAKER_SIDE, WAVE, SHADOW_HARD, TXT, YES_BG,
+    YES_FG, mix,
 )
 
 
@@ -37,13 +46,13 @@ def _font(size: int, bold: bool = False) -> QFont:
 
 # 字号从不随状态变:提到模块级建一次。paint 每帧重建 QFont 要走字体匹配查找,
 # 而 paint 是「每个工位 × 每次 tick/闪烁/悬停」都跑的。
-FONT_NAME = _font(9, bold=True)     # 浮在头顶的成员名
-FONT_EMOJI = _font(12)              # 脑袋上的 emoji
+FONT_NAME = _font(8, bold=True)     # 挡板上那块名牌
 FONT_SUB = _font(8)                 # 会话行 / 控制台标题
 
 
 # 「起来了」的状态:明暗、手型、屏幕闪统一按它判断,别散着写 == "running"
 UP_STATES = ("running", "busy", "idle")
+
 
 
 @dataclass(frozen=True)
@@ -61,8 +70,29 @@ STATE_STYLE = {
 }
 
 
-def _elide(s: str, n: int) -> str:
-    return s if len(s) <= n else s[: n - 1] + "…"
+# 显示器在桌上的位置和宽度(房间单位)。名牌的左边界由它算出来,所以显示器一动、
+# 名牌跟着动,不用手调两处。
+MON_X, MON_W = 13.0, 16.0
+
+# 屏风上那块名牌:从显示器右沿起、到桌子右端止。
+# 名牌在 y=1.4 的屏风面上、显示器在 y=6 的面上,两个面差 4.6 个单位才对齐到同一条
+# 屏幕竖线上(屏幕 x = OX + (x房间 - y房间)*2),所以这里要减 4.6,不是直接接上。
+PLATE_X = MON_X + MON_W - 4.6 + 0.3             # 再留 0.3 单位的缝
+# 长度是**沿板子方向的真实长度**、不是横向投影宽度:横向差 1 单位 = 2px,
+# 沿板方向就是 2/0.8944 = 2.2361px。桌子或显示器改了,这里自动跟着变。
+PLATE_LEN = (DESK_X - PLATE_X) * 2.2361
+
+
+_PLATE_FM: QFontMetricsF | None = None
+
+
+def _plate_text(name: str) -> str:
+    """按**字宽**把名字裁到屏风上那块名牌装得下——名牌只有 PLATE_LEN 那么长,
+    按字数裁不行:`etl` 和 `customer-web` 同样是 3/12 个字符,宽度差三倍。"""
+    global _PLATE_FM
+    if _PLATE_FM is None:                   # QFontMetricsF 得等 QApplication 起来才能建
+        _PLATE_FM = QFontMetricsF(FONT_NAME)
+    return _PLATE_FM.elidedText(name, Qt.TextElideMode.ElideRight, PLATE_LEN)
 
 
 class SeatItem(QGraphicsObject):
@@ -72,15 +102,18 @@ class SeatItem(QGraphicsObject):
     speaker_clicked = Signal(str)       # 点 🔊:停止朗读
     moved = Signal(str)                 # 拖完:该存盘了
 
+    # 椅子中心(房间坐标)。paint 和命中区都从这里取,别各写一份。
+    HX, HY = 19.0, 29.0
+
     def __init__(self, member):
         super().__init__()
         self.name = member.name
-        self.emoji = member.emoji
         self.color = QColor(member.color)
         self._state = "down"
         self._msg = False
         self._blink = True
         self._speaking = False
+        self._away = False      # 跑腿送信去了:椅子空着,人在画布上走
         self._title = ""
         self._sub = "新会话"
         self._papers = 0                # 桌上那叠文件的张数 = 历史会话条数
@@ -108,6 +141,13 @@ class SeatItem(QGraphicsObject):
     def set_blink(self, on: bool) -> None:
         self._blink = bool(on)
         if self.is_flashing() or self._msg:
+            self.update()
+
+    def set_away(self, on: bool) -> None:
+        """离座(跑腿送信中):画成空椅子。不然工位上坐着一个、画布上还走着一个,
+        同一个人出现两次。"""
+        if self._away != bool(on):
+            self._away = bool(on)
             self.update()
 
     def set_speaking(self, on: bool) -> None:
@@ -169,17 +209,19 @@ class SeatItem(QGraphicsObject):
     def boundingRect(self) -> QRectF:
         return QRectF(0, 0, SEAT_W, SEAT_H)
 
+    # 三块命中区的数值 = 对应家具在 _pt 投影下的包围盒。改了家具的房间坐标,
+    # 这里必须跟着改——paint 和 hit 对不上,就会「点纸弹控制台」。三块互不重叠。
     def r_speaker(self) -> QRectF:
-        """桌上那个小音响:朗读时它冒音浪,点它停播。"""
-        return QRectF(28, 30, 28, 30)
+        """桌上那个小音响(桌子左角):朗读时它冒音浪,点它停播。"""
+        return QRectF(51, 16, 17, 21)
 
     def r_person(self) -> QRectF:
         """人和椅子那一块:右键它 = 对这个人下命令(上班 / 下班)。"""
-        return QRectF(74, 66, 54, 74)
+        return QRectF(25, 40, 34, 74)
 
     def r_files(self) -> QRectF:
         """桌上那叠文件:一张纸 = 一条历史会话,右键它挑会话。"""
-        return QRectF(130, 30, 40, 28)
+        return QRectF(98, 69, 45, 28)
 
     def hit(self, pos: QPointF) -> str:
         """局部坐标 → "speaker" / "person" / "files" / "seat"。
@@ -195,12 +237,32 @@ class SeatItem(QGraphicsObject):
             return "files"
         return "seat"
 
+    # ---------- 小人 ----------
+    def chair_pos(self) -> QPointF:
+        """椅子在地面上的落点(工位局部坐标)。walker 从这儿出发、也走到这儿。"""
+        return _pt(self.HX, self.HY, 0)
+
+    def _person_sitting(self, p: QPainter) -> None:
+        """坐姿(画法见 office/person.py,和送信的小人共用一份)。
+
+        **底盘和气杆在 (HX, HY),人和椅背往 +y 偏一点**:人面朝 -y(显示器那边),
+        背靠的椅背自然在 +y 那侧;等距下 +y = 屏幕左下,椅背落在人的左下方,一眼能
+        看出这把椅子是**朝着屏幕**的。偏太多人就不在座位中间了(踩过),所以只偏
+        1.5 / 4 个单位——够看出朝向,又还坐在底盘正上方。
+        谁压住谁靠画序决定(椅背在人之后画),不靠 y。
+        """
+        person.draw_sitting(p, self.color, self.HX, self.HY + 1.5)
+
     # ---------- 绘制 ----------
     def paint(self, p: QPainter, opt, widget) -> None:
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         up = self.is_up()
+        # present ≠ up:`启动中` 是「人到了但还没坐下」——屏幕该亮琥珀、椅子旁该站着人,
+        # 只有真的没上班(down)才是空椅子 + 黑屏 + 整张置灰。而 up 仍然只管「起来了」
+        # 那几个状态(闪烁、朗读、点击置前都按它判断,别混用)。
+        present = self._state != "down"
         st = STATE_STYLE[self._state]
-        p.setOpacity(1.0 if up else OFF_OPACITY)
+        p.setOpacity(1.0 if present else OFF_OPACITY)
         flash = self.is_flashing()
         glow = QColor(st.glow)
         p.setPen(Qt.PenStyle.NoPen)
@@ -215,111 +277,218 @@ class SeatItem(QGraphicsObject):
             p.setBrush(QBrush(QColor(255, 255, 255, 170)))
             p.drawRoundedRect(QRectF(6, 10, SEAT_W - 12, SEAT_H - 16), 14, 14)
 
-        # 桌子:先画(在最后面)。梯形桌面(近大远小)+ 前沿板厚 + 两条腿
-        p.setBrush(QBrush(SHADOW_HARD))
-        p.drawPolygon(QPolygonF([QPointF(36, 34), QPointF(166, 34),
-                                 QPointF(178, 62), QPointF(24, 62)]))
-        p.setBrush(QBrush(DESK_TOP if up else DESK_TOP_OFF))
-        p.drawPolygon(QPolygonF([QPointF(34, 30), QPointF(164, 30),
-                                 QPointF(176, 58), QPointF(22, 58)]))
-        p.setBrush(QBrush(DESK_FRONT if up else DESK_FRONT_OFF))
-        p.drawPolygon(QPolygonF([QPointF(22, 58), QPointF(176, 58),
-                                 QPointF(176, 64), QPointF(22, 64)]))
-        p.setBrush(QBrush(DESK_LEG))
-        p.drawRect(QRectF(30, 64, 6, 22))
-        p.drawRect(QRectF(162, 64, 6, 22))
-
-        # 显示器:摆在桌面中间偏后,**屏幕朝下正对着座位**(也就是朝我们)
+        # ============ 家具(全部走等距投影,见 _pt / _on) ============
+        # 桌子:DESK_X × DESK_Y 的长方桌(长边对着人),桌面在 z=26。
+        # 先画影子和桌腿,再用桌面盖住腿的上半截。
         p.setBrush(QBrush(SHADOW))
-        p.drawRoundedRect(QRectF(64, 16, 54, 32), 3, 3)
+        p.drawPolygon(_quad((2, 2, 0), (DESK_X - 1, 2, 0),
+                            (DESK_X - 1, DESK_Y - 2, 0), (2, DESK_Y - 2, 0)))
+        # 桌子底下:**左端侧板腿 + 右端抽屉柜**,中间整段留空。四条细腿 + 底下全空
+        # 那是餐桌,工位的辨识度就在这两块板和后面那道屏风上。
+        # (曾经沿着近侧长边加过一条通长挡板,撤了:只撤座位那一段更尴尬,整条去掉才干净。)
+        # 按 x+y(离镜头远近)排画序,不然会穿帮。
+        shade = DESK_SHADE if present else DESK_FRONT_OFF
+        p.setBrush(QBrush(shade))
+        p.save()                                    # 左侧板腿(看到的是它朝右的那面)
+        _on(p, ISO_FY, 3, 3, 23)
+        p.drawRect(QRectF(0, 0, 16, 23))
+        p.restore()
+        p.save()                                    # 抽屉柜:右侧面
+        _on(p, ISO_FY, DESK_X - 2, 3, 23)
+        p.drawRect(QRectF(0, 0, 16, 23))
+        p.restore()
+        p.save()                                    # 抽屉柜:正面 + 三道抽屉缝
+        _on(p, ISO_FX, DESK_X - 13, 19, 23)
+        p.drawRect(QRectF(0, 0, 10, 23))
+        p.setBrush(QBrush(DRAWER_LINE if present else DESK_TOP_OFF))
+        for i in range(3):
+            p.drawRect(QRectF(1.5, 4 + i * 6.5, 7, 0.8))
+        p.restore()
+        p.save()                                    # 桌面(水平面)
+        _on(p, ISO_TOP, 0, 0, 26)
+        p.setBrush(QBrush(DESK_TOP if present else DESK_TOP_OFF))
+        p.drawRoundedRect(QRectF(0, 0, DESK_X, DESK_Y), 1.2, 1.2)
+        p.restore()
+        p.setBrush(QBrush(DESK_FRONT if present else DESK_FRONT_OFF))
+        p.save()                                    # 两条**朝着我们**的桌沿板厚
+        _on(p, ISO_FX, 0, DESK_Y, 26)
+        p.drawRect(QRectF(0, 0, DESK_X, 3))
+        p.restore()
+        p.save()
+        _on(p, ISO_FY, DESK_X, 0, 26)
+        p.drawRect(QRectF(0, 0, DESK_Y, 3))
+        p.restore()
+
+        # 后屏风:立在桌子里侧边上,比桌面高出 12。整个场景里「这是工位不是餐桌」
+        # 就靠它一眼定性。画在桌面之后、桌上东西之前(它是最远的那一样)。
+        p.save()
+        _on(p, ISO_TOP, 0, 0, 41)
+        p.setBrush(QBrush(PARTITION_TOP))
+        p.drawRect(QRectF(0, 0, DESK_X, 1.4))       # 顶沿
+        p.restore()
+        p.save()
+        _on(p, ISO_FX, 0, 1.4, 41)
+        p.setBrush(QBrush(PARTITION))
+        p.drawRect(QRectF(0, 0, DESK_X, 15))        # 朝我们那面
+        p.restore()
+        # 成员名:印在屏风**右段**(显示器右边那截空出来的地方)。
+        # 用 ISO_TEXT_FX 而不是 ISO_FX——后者会把字横向拉成两倍宽。
+        p.save()
+        _on(p, ISO_TEXT_FX, PLATE_X, 1.4, 41)
+        p.setFont(FONT_NAME)
+        p.setPen(QPen(TXT if present else DIM))
+        p.drawText(QRectF(0, 0, PLATE_LEN, 12),                  # 右对齐:贴屏风右端,
+                   Qt.AlignmentFlag.AlignRight                   # 别顶着显示器那头
+                   | Qt.AlignmentFlag.AlignVCenter, _plate_text(self.name))
+        p.restore()
+        p.setPen(Qt.PenStyle.NoPen)
+
+        # 显示器:立在桌子里侧(y 小),**屏幕朝左前**,正对着坐在那边的人
+        p.save()
+        _on(p, ISO_FX, MON_X, 6, 49)
         p.setBrush(QBrush(BEZEL))
-        p.drawRoundedRect(QRectF(62, 12, 54, 32), 3, 3)
-        p.setBrush(QBrush(glow if up else SCREEN_OFF))
-        p.drawRoundedRect(QRectF(64, 14, 50, 26), 2, 2)
-        if up:
+        p.drawRoundedRect(QRectF(0, 0, MON_W, 20), 1.5, 1.5)
+        p.setBrush(QBrush(glow if present else SCREEN_OFF))
+        p.drawRoundedRect(QRectF(1, 1.2, MON_W - 2, 16.4), 1, 1)
+        if present:
             p.setBrush(QBrush(QColor(255, 255, 255, 145)))
-            for i, wpx in enumerate((32, 20, 36)):
-                p.drawRect(QRectF(68, 19 + i * 6, wpx, 2))
-        p.setBrush(QBrush(BEZEL))
-        p.drawRect(QRectF(84, 44, 10, 4))                   # 支架
-        p.drawRoundedRect(QRectF(78, 47, 22, 3), 1.5, 1.5)  # 底座
-        # 桌上的小音响(显示器左边),小一点、不抢戏
-        p.setBrush(QBrush(SPEAKER))
-        p.drawRoundedRect(QRectF(36, 38, 13, 18), 2.5, 2.5)
+            for i, wu in enumerate((10, 6, 11)):
+                p.drawRect(QRectF(2.6, 3.6, wu, 1.4).translated(0, i * 4))
+        p.restore()
+        p.setBrush(QBrush(BEZEL))                   # 支架 + 底座
+        stand = _pt(MON_X + MON_W / 2, 6, 29)
+        p.drawRect(QRectF(stand.x() - 2.5, stand.y(), 5, 3))
+        p.save()
+        _on(p, ISO_TOP, MON_X + MON_W / 2 - 2.5, 4, 26.4)
+        p.drawRoundedRect(QRectF(0, 0, 5, 4), 1.2, 1.2)
+        p.restore()
+
+        # 键盘 + 鼠标:摆在显示器**前面**(y 大 = 离人近),正好是坐着那人手的位置
+        p.save()
+        _on(p, ISO_TOP, 13, 13, 26.3)
+        p.setBrush(QBrush(KEYBOARD))
+        p.drawRoundedRect(QRectF(0, 0, 15, 5), 1, 1)
+        p.setBrush(QBrush(KEY))                     # 三道键位,不然只是块深色板子
+        for i in range(3):
+            p.drawRect(QRectF(1, 1 + i * 1.3, 13, 0.6))
+        p.restore()
+        p.save()                                    # 键盘前沿的厚度
+        _on(p, ISO_FX, 13, 18, 26.3)
+        p.setBrush(QBrush(KEYBOARD))
+        p.drawRect(QRectF(0, 0, 15, 1.2))
+        p.restore()
+        p.save()
+        _on(p, ISO_TOP, 29.5, 15, 26.3)
+        p.setBrush(QBrush(KEYBOARD))
+        p.drawRoundedRect(QRectF(0, 0, 3, 4.2), 1.4, 1.4)   # 鼠标
+        p.restore()
+
+        # 桌上的小音响(桌子后左角)。**别摆在人正前方**:小人的头会顶到桌面上来,
+        # 摆在那儿就压在脑袋上,连命中区都和「点人」抢(踩过)。
+        p.save()
+        _on(p, ISO_TOP, 1, 2, 38)
         p.setBrush(QBrush(SPEAKER_CONE))
-        p.drawEllipse(QRectF(38.5, 45, 8, 8))               # 低音单元
-        p.drawEllipse(QRectF(41, 40.5, 3, 3))               # 高音单元
+        p.drawRoundedRect(QRectF(0, 0, 3.5, 4), 0.8, 0.8)   # 顶面
+        p.restore()
+        p.save()
+        _on(p, ISO_FY, 4.5, 2, 38)
+        p.setBrush(QBrush(SPEAKER_SIDE))
+        p.drawRect(QRectF(0, 0, 4, 12))                 # 右前那个侧面
+        p.restore()                                     # (等距下一个盒子该露三面:
+        p.save()                                        #  顶 + 左前 + 右前,少一面就塌)
+        _on(p, ISO_FX, 1, 6, 38)
+        p.setBrush(QBrush(SPEAKER))
+        p.drawRect(QRectF(0, 0, 3.5, 12))               # 朝左前的正面
+        p.setBrush(QBrush(SPEAKER_CONE))
+        p.drawEllipse(QRectF(0.8, 5, 2, 3.2))           # 低音单元
+        p.drawEllipse(QRectF(1.3, 1.8, 1.1, 1.7))       # 高音单元
+        p.restore()
         if up and self._speaking:
-            # 音浪:从音响往**左右两侧**一圈圈扩散,越远越淡(比竖条音量表更像声音)
-            cx, cy = 42.5, 47.0
+            # 音浪:从音响往左右两侧一圈圈扩散,越远越淡(比竖条音量表更像声音)
+            c0 = _pt(2.75, 4, 32)
             p.setBrush(Qt.BrushStyle.NoBrush)
             for i in range(3):
-                r = 9 + i * 6 + self._wave * 2       # 相位推着往外走
+                r = 10 + i * 7 + self._wave * 2         # 相位推着往外走
                 c = QColor(WAVE)
                 c.setAlpha(max(0, 190 - i * 55 - self._wave * 20))
                 p.setPen(QPen(c, 1.8))
-                box = QRectF(cx - r, cy - r, r * 2, r * 2)
-                p.drawArc(box, -50 * 16, 100 * 16)          # 右half的一段弧
-                p.drawArc(box, 130 * 16, 100 * 16)          # 左half的一段弧
+                box = QRectF(c0.x() - r, c0.y() - r * 0.5, r * 2, r)
+                p.drawArc(box, -50 * 16, 100 * 16)
+                p.drawArc(box, 130 * 16, 100 * 16)
             p.setPen(Qt.PenStyle.NoPen)
 
+        # 杯子:就在音响**前面**。要读成「前面」得 x 和 y 一起加——等距下只加 y 是
+        # 往左前走,看着像「在音响左边」;x、y 同时加才是屏幕上的正下方。
         p.setBrush(QBrush(MUG))
-        p.drawRoundedRect(QRectF(124, 44, 11, 11), 3, 3)    # 杯子
+        top = _pt(10.5, 11.5, 32)
+        p.drawRect(QRectF(top.x() - 4.5, top.y(), 9, 6))
+        p.drawEllipse(QRectF(top.x() - 4.5, top.y() + 3.5, 9, 4.5))
+        p.drawEllipse(QRectF(top.x() - 4.5, top.y() - 2.2, 9, 4.5))
 
-        # 桌上一叠文件:一张纸 = 一条历史会话(最多画 3 张,再多就摞不出层次了)
+        # 桌上一叠文件:一张纸 = 一条历史会话。摆在**显示器右侧**(x 大)。
+        # **别画小**:这块是右键「接着这条继续 / 删除这条记录」的唯一入口,
+        # 小了不好点(命中区 r_files 也跟着这里的尺寸走)。
         if self._papers:
-            for i in range(min(3, self._papers)):
-                off = i * 3
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(SHADOW))
-                p.drawRoundedRect(QRectF(137 - off, 37 - off, 28, 20), 2, 2)
-                p.setPen(QPen(PAPER_EDGE, 1))       # 白纸压白桌,得勾条边
+            n = min(3, self._papers)
+            for i in range(n):
+                p.save()
+                _on(p, ISO_TOP, 39 - i * 0.6, 9 - i * 0.6, 26.3 + i * 0.9)
+                p.setPen(QPen(PAPER_EDGE, 0.6))     # 白纸压木桌,勾条暖灰边才有厚度
                 p.setBrush(QBrush(PAPER))
-                p.drawRoundedRect(QRectF(136 - off, 34 - off, 28, 20), 2, 2)
+                p.drawRoundedRect(QRectF(0, 0, 10, 12), 0.9, 0.9)   # 竖放:y 向更长
+                if i == n - 1:                      # 最上面那张画两条「字」
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(QBrush(PAPER_LINE))
+                    p.drawRect(QRectF(2, 3, 6, 0.9))
+                    p.drawRect(QRectF(2, 5.4, 3.8, 0.9))
+                p.restore()
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(PAPER_LINE))          # 最上面那张画两条「字」
-            p.drawRect(QRectF(140 - (min(3, self._papers) - 1) * 3,
-                              38 - (min(3, self._papers) - 1) * 3, 16, 1.5))
-            p.drawRect(QRectF(140 - (min(3, self._papers) - 1) * 3,
-                              42 - (min(3, self._papers) - 1) * 3, 11, 1.5))
 
-        # 椅子和人:在桌子**前面**(下方),我们看到的是后脑勺和椅背
+        # ============ 椅子和人 ============
+        # 坐在桌子的左前方(y 大 = 离镜头近),面朝桌子,所以我们看到的是后脑勺和椅背。
+        # 画序:影子 → 五爪底盘 → 气杆 → 座垫 → 人 → 椅背(椅背离镜头最近,压住身体)。
+        if not present:
+            p.save()                                # 空工位:椅子淡进地毯,才读得出「没人」
+            p.setOpacity(0.5)                       # (深灰蓝不淡的话像「人刚离开」)
+        HX, HY = self.HX, self.HY                   # 椅子中心(房间坐标)
+        hub = _pt(HX, HY, 0)
         p.setBrush(QBrush(SHADOW))
-        p.drawEllipse(QRectF(70, 128, 60, 16))              # 落地影
-        if up:
-            # 先画人,再用椅背盖住身体——从背后看就是这个遮挡关系
-            p.setBrush(QBrush(self.color))
-            p.drawRoundedRect(QRectF(82, 86, 36, 34), 14, 14)
-            p.setBrush(QBrush(HEAD))
-            p.drawEllipse(QRectF(86, 68, 28, 28))           # 后脑勺
-            p.setFont(FONT_EMOJI)
-            p.setPen(QPen(TXT))
-            p.drawText(QRectF(86, 68, 28, 28),
-                       Qt.AlignmentFlag.AlignCenter, self.emoji)
-            p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(CHAIR_DARK))
-        p.drawRoundedRect(QRectF(76, 96, 48, 34), 10, 10)   # 椅背(朝着我们)
-        p.setBrush(QBrush(CHAIR))
-        p.drawRoundedRect(QRectF(82, 102, 36, 20), 7, 7)    # 椅背中间那块软垫
-        p.setBrush(QBrush(CHAIR_DARK))
-        p.drawRect(QRectF(98, 128, 4, 8))                   # 气杆
-        # 五爪脚 + 轮子:光一根气杆看着像浮着,有腿才坐得住。
-        # 用「从中心辐射的线」画,别用横条——横条排出来像把扇子。
-        hub = QPointF(100, 135)
-        p.setPen(QPen(CHAIR_DARK, 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        feet = ((-21, 6), (-11, 10), (0, 12), (11, 10), (21, 6))
-        for dx, dy in feet:
-            p.drawLine(hub, QPointF(hub.x() + dx, hub.y() + dy))
+        p.drawEllipse(QRectF(hub.x() - 23, hub.y() - 11, 46, 22))
+        p.setPen(QPen(CHAIR_LEG, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        import math                                 # 五爪:在房间平面上均分五个方向再投影
+        feet = [(HX + 7.5 * math.cos(t), HY + 7.5 * math.sin(t))
+                for t in (math.radians(-90 + i * 72) for i in range(5))]
+        for fx, fy in feet:
+            p.drawLine(hub, _pt(fx, fy, 1.5))
         p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(CHAIR_LEG))
+        for fx, fy in feet:
+            c = _pt(fx, fy, 1.5)
+            p.drawEllipse(QRectF(c.x() - 2.4, c.y() - 1.6, 4.8, 3.2))
+        p.setBrush(QBrush(CHAIR_DARK))              # 气杆
+        gas = _pt(HX, HY, 15)
+        p.drawRect(QRectF(gas.x() - 2, gas.y(), 4, 13))
+        p.save()                                    # 座垫(水平面):从椅背往前伸出来一截
+        _on(p, ISO_TOP, HX - 4, HY - 4, 18)
+        p.setBrush(QBrush(CHAIR))
+        p.drawRoundedRect(QRectF(0, 0, 8, 8), 2, 2)
+        p.restore()
+        if present and not self._away:              # 坐着的人:椅背会压住他的下半身
+            self._person_sitting(p)
+        # 椅背:离镜头最近,压住身体。**画在 ISO_FX 面上**——画面里别的东西都是斜的,
+        # 椅背要是画成屏幕坐标的矩形(上沿水平),就像一块正对镜头的板子,读不出这把
+        # 椅子朝哪边(踩过)。躯干也在同一个面上,两者上沿平行,肩膀才是等宽的一条。
+        # 特意矮一档(中背椅):椅背一高就把成员配色全盖住了,只剩个脑袋分不出谁是谁。
+        p.save()                                # 椅背在座垫**后沿**(人背后那侧)
+        _on(p, ISO_FX, HX - 6.5, HY + 4, 31)
         p.setBrush(QBrush(CHAIR_DARK))
-        for dx, dy in feet:
-            p.drawEllipse(QRectF(hub.x() + dx - 2.2, hub.y() + dy - 1.6, 4.4, 4.4))
+        p.drawRoundedRect(QRectF(0, 0, 13, 17), 3, 3)
+        p.setBrush(QBrush(CHAIR))
+        p.drawRoundedRect(QRectF(1.8, 2.4, 9.4, 10), 2, 2)
+        p.restore()
+        if not present:
+            p.restore()                             # 收掉上面那层给空椅子的淡化
 
-        # 名字:工位最上面一行
-        p.setFont(FONT_NAME)
-        p.setPen(QPen(TXT if up else DIM))
-        p.drawText(QRectF(0, 0, SEAT_W, 14),
-                   Qt.AlignmentFlag.AlignCenter, _elide(self.name, 14))
 
 
     # ---------- 交互 ----------

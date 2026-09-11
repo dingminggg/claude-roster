@@ -1,8 +1,13 @@
-"""文件信号:Claude Code hook 与驾驶舱之间的两条独立通路(权限 pending / 答完一轮)。
+"""文件信号:Claude Code hook 与驾驶舱之间的几条独立通路。
 
-均在 ~/.claude/data/claude-cockpit/ 下:pending/(每个等权限确认的会话一个
-<session_id>.json)、turn-ended/(答完一轮)。写入原子(tempfile + os.replace),
-读取对缺失/损坏文件容错。本项目自带这套信号,不再依赖 desk-buddy(已解耦)。
+均在 ~/.claude/data/claude-cockpit/ 下:
+  pending/      每个等权限确认的会话一个 <session_id>.json(**状态**,清了才没)
+  turn-ended/   答完一轮(**状态**)
+  speaking/     正在朗读(**状态**,由 TTS 写)
+  messages/     会话之间发了消息(**事件**:读一次删一次,同一会话可以连着好几条)
+
+写入原子(tempfile + os.replace),读取对缺失/损坏文件容错。本项目自带这套信号,
+不再依赖 desk-buddy(已解耦)。
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import os
 import re
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -154,6 +160,59 @@ def read_turn_ended_full() -> list[dict]:
 
 def prune_turn_ended(max_age_seconds: int = 1800) -> None:
     _prune(turn_dir(), max_age_seconds)
+
+
+# ── 「会话间发消息」信号:PostToolUse hook(匹配 SendMessage 工具)写,驾驶舱读走就删。──
+# 和上面两条通道不同,**这是事件不是状态**:同一个会话可能连发好几条,所以文件名带
+# 时间戳 + 随机后缀(不能像 pending 那样按 session_id 覆盖),读一次删一次。
+
+
+def messages_dir() -> Path:
+    return data_dir() / "messages"
+
+
+def write_message(from_cwd: str, to_name: str) -> None:
+    """记一笔「谁给谁发了消息」。from 是发送方的 cwd(用来对成员),to 是**会话名**
+    (不是成员名——成员叫 fad-2、会话叫 fad-backend-2-f3,对应关系由 peers 给)。"""
+    if not from_cwd or not to_name:
+        return
+    d = messages_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    payload = {"from_cwd": from_cwd, "to_name": to_name, "at": time.time()}
+    fd, tmp = tempfile.mkstemp(prefix=".cc-", suffix=".json", dir=str(d))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        os.replace(tmp, d / f"{time.time_ns()}-{uuid.uuid4().hex[:6]}.json")
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def take_messages(max_age_seconds: int = 30) -> list[dict]:
+    """**读走**(并删掉)所有消息事件,按时间排序。
+
+    超龄的直接丢不补演:驾驶舱没开着的时候攒下一堆,开面板时一窝蜂全跑起来没意义。
+    """
+    d = messages_dir()
+    if not d.exists():
+        return []
+    cutoff = time.time() - max_age_seconds
+    out: list[dict] = []
+    for f in sorted(d.glob("*.json")):
+        try:
+            rec = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            rec = None
+        try:
+            f.unlink()                      # 读一次就删,事件不留底
+        except OSError:
+            pass
+        if isinstance(rec, dict) and float(rec.get("at") or 0) >= cutoff:
+            out.append(rec)
+    return out
 
 
 # ── 「正在朗读」信号:TTS(~/.claude/hooks/tts_stop.py)播放某会话回复期间写入,播完删。──
