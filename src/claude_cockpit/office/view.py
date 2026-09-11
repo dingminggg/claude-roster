@@ -30,6 +30,7 @@ from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 # 「成员多了看不过来」——真正要的是把不常用的单独缩小。
 SEAT_SCALES = (("标准", 1.0), ("小", 0.7), ("更小", 0.5))
 SAVE_DEBOUNCE_MS = 400
+SCREEN_MS = 120                 # 屏幕上那几行往上滚的帧间隔
 WAVE_MS = 180            # 音浪一帧;只在有人朗读时才转,没人说话就停表
 
 
@@ -111,6 +112,9 @@ class OfficeWindow(QMainWindow):
         self._save_timer.setInterval(SAVE_DEBOUNCE_MS)
         self._save_timer.timeout.connect(self.save_layout)
         self._blink_on = True
+        self._screen_timer = QTimer(self)    # 屏幕滚动:有人在忙才跑
+        self._screen_timer.setInterval(SCREEN_MS)
+        self._screen_timer.timeout.connect(self._tick_screen)
         self._wave_timer = QTimer(self)      # 音浪:朗读时才跑,免得白烧 CPU
         self._wave_timer.setInterval(WAVE_MS)
         self._wave_timer.timeout.connect(self._tick_wave)
@@ -278,6 +282,19 @@ class OfficeWindow(QMainWindow):
         seat = self.seats.get(name)
         if seat is not None:
             seat.set_run_state(state)
+        self._sync_screen_timer()
+
+    def _sync_screen_timer(self) -> None:
+        """有人在干活才开表:一屋子闲人不该每 120ms 醒一次(同音浪那条的口径)。"""
+        working = any(s.is_working() for s in self.seats.values())
+        if working and not self._screen_timer.isActive():
+            self._screen_timer.start()
+        elif not working and self._screen_timer.isActive():
+            self._screen_timer.stop()
+
+    def _tick_screen(self) -> None:
+        for seat in self.seats.values():
+            seat.advance_scroll()
 
     def set_message(self, name: str, on: bool) -> None:
         seat = self.seats.get(name)

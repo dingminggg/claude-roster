@@ -419,3 +419,12 @@ def test_area_snaps_to_floor_tiles(win):
     area.setPos(TILE * 3 + 17, TILE * 2 - 9)
     win._on_area_changed("后端组")
     assert area.pos().x() % TILE == 0 and area.pos().y() % TILE == 0
+
+
+def test_screen_timer_runs_only_when_someone_is_busy(win):
+    """没人干活就停表:一屋子闲人不该每 120ms 醒一次(同音浪那条的口径)。"""
+    assert not win._screen_timer.isActive()
+    win.set_run_state("fad", "busy")
+    assert win._screen_timer.isActive()
+    win.set_run_state("fad", "idle")
+    assert not win._screen_timer.isActive()

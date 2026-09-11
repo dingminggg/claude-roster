@@ -193,7 +193,7 @@ def test_left_click_still_works(app, seat):
 def test_hit_regions_are_semantic(app, seat):
     """命中区是有语义的:点人 = 管上下班,点文件 = 管会话历史,其余 = 点工位。"""
     seat.set_run_state("busy")
-    assert seat.hit(QPointF(42, 80)) == "person"   # 椅子上的人
+    assert seat.hit(QPointF(43, 90)) == "person"   # 椅子上的人
     assert seat.hit(QPointF(40, 150)) == "seat"      # 桌腿旁边的空地
     at_speaker = QPointF(59, 26)                     # 桌上那个小音响
     assert seat.hit(at_speaker) == "seat"            # 没在朗读:它只是个摆设
@@ -204,7 +204,7 @@ def test_hit_regions_are_semantic(app, seat):
 def test_files_only_exist_when_there_are_sessions(app, seat):
     """没有历史会话就没有那叠文件,那块地方当普通桌面。"""
     seat.set_run_state("down")
-    at_files = QPointF(120, 83)
+    at_files = QPointF(134, 79)
     assert seat.hit(at_files) == "seat"
     seat.set_session_count(3)
     assert seat.hit(at_files) == "files"
@@ -236,3 +236,24 @@ def test_wave_only_animates_while_speaking(app, seat):
     assert seat._wave == 1
     seat.set_speaking(False)
     assert seat._wave == 0              # 停了就归位,下次从头跳
+
+
+def test_screen_scrolls_only_while_busy(app, seat):
+    """屏幕在滚 = 正在干活。空闲的不滚——那是「谁在忙」的第二遍表达,滚了就没信息量。"""
+    seat.set_run_state("idle")
+    before = seat._scroll
+    seat.advance_scroll()
+    assert seat._scroll == before
+    seat.set_run_state("busy")
+    seat.advance_scroll()
+    assert seat._scroll > before
+
+
+def test_screen_scroll_wraps(app, seat):
+    """偏移必须绕回来,不然滚着滚着行就跑到屏幕外面再也不回来了。"""
+    from claude_cockpit.office.seat_item import LINE_GAP
+    seat.set_run_state("busy")
+    span = len(seat._lines) * LINE_GAP
+    for _ in range(500):
+        seat.advance_scroll()
+        assert 0 <= seat._scroll < span

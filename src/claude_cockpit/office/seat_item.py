@@ -50,6 +50,12 @@ FONT_NAME = _font(8, bold=True)     # 挡板上那块名牌
 FONT_SUB = _font(8)                 # 会话行 / 控制台标题
 
 
+# 屏幕上那几行「字」:忙的时候往上滚,像终端在刷输出。
+# 宽度表按成员名错开一个起点,免得一屋子屏幕整齐划一地同步滚(那看着像动画贴图)。
+SCREEN_LINES = (15, 9, 16, 12, 19, 8, 14, 10)
+LINE_GAP = 4.0                      # 行距(房间单位)
+SCROLL_STEP = 0.55                  # 每帧往上挪多少
+
 # 「起来了」的状态:明暗、手型、屏幕闪统一按它判断,别散着写 == "running"
 UP_STATES = ("running", "busy", "idle")
 
@@ -72,12 +78,15 @@ STATE_STYLE = {
 
 # 显示器在桌上的位置和宽度(房间单位)。名牌的左边界由它算出来,所以显示器一动、
 # 名牌跟着动,不用手调两处。
-MON_X, MON_W = 13.0, 16.0
+MON_X, MON_W, MON_H = 12.0, 24.0, 28.0
+MON_Y = 8.0                                     # 显示器摆在桌上的进深位置
 
 # 屏风上那块名牌:从显示器右沿起、到桌子右端止。
-# 名牌在 y=1.4 的屏风面上、显示器在 y=6 的面上,两个面差 4.6 个单位才对齐到同一条
-# 屏幕竖线上(屏幕 x = OX + (x房间 - y房间)*2),所以这里要减 4.6,不是直接接上。
-PLATE_X = MON_X + MON_W - 4.6 + 0.3             # 再留 0.3 单位的缝
+# 名牌在 y=1.4 的屏风面上、显示器在 y=MON_Y 的面上,两个面差 (MON_Y-1.4) 个单位才
+# 对齐到同一条屏幕竖线上(屏幕 x = OX + (x房间 - y房间)*2),所以要减掉,不是直接接上。
+# 4.6 那个数是 MON_Y - 1.4(显示器面和屏风面的进深差),显示器一挪就得跟着变,
+# 所以这里直接用 MON_Y 算,别再写死。
+PLATE_X = MON_X + MON_W - (MON_Y - 1.4) + 0.3   # 再留 0.3 单位的缝
 # 长度是**沿板子方向的真实长度**、不是横向投影宽度:横向差 1 单位 = 2px,
 # 沿板方向就是 2/0.8944 = 2.2361px。桌子或显示器改了,这里自动跟着变。
 PLATE_LEN = (DESK_X - PLATE_X) * 2.2361
@@ -103,7 +112,7 @@ class SeatItem(QGraphicsObject):
     moved = Signal(str)                 # 拖完:该存盘了
 
     # 椅子中心(房间坐标)。paint 和命中区都从这里取,别各写一份。
-    HX, HY = 19.0, 29.0
+    HX, HY = 19.0, 27.0
 
     def __init__(self, member):
         super().__init__()
@@ -118,6 +127,9 @@ class SeatItem(QGraphicsObject):
         self._sub = "新会话"
         self._papers = 0                # 桌上那叠文件的张数 = 历史会话条数
         self._wave = 0                  # 音浪动画的相位(朗读时才转)
+        self._scroll = 0.0              # 屏幕滚动的偏移(忙的时候才转)
+        k = sum(ord(c) for c in self.name) % len(SCREEN_LINES)
+        self._lines = SCREEN_LINES[k:] + SCREEN_LINES[:k]
         self._hover = False
         self._press_pos = None          # 按下时的位置,用来判断松手时是否真挪过
         # 只要可拖,**不要 ItemIsSelectable**:Qt 拖一个图元时会把所有「选中的」
@@ -154,6 +166,17 @@ class SeatItem(QGraphicsObject):
         if self._speaking != bool(on):
             self._speaking = bool(on)
             self._wave = 0
+            self.update()
+
+    def is_working(self) -> bool:
+        """屏幕在滚 = **正在干活**。空闲的不滚:一屋子屏幕全在动就没有信息量了,
+        而且那是「谁在忙」的第二遍表达(第一遍是屏幕颜色),动起来才互相加强。"""
+        return self._state == "busy"
+
+    def advance_scroll(self) -> None:
+        """屏幕往上滚一帧(由 OfficeWindow 的定时器驱动,只在有人忙时才转)。"""
+        if self.is_working():
+            self._scroll = (self._scroll + SCROLL_STEP) % (len(self._lines) * LINE_GAP)
             self.update()
 
     def advance_wave(self) -> None:
@@ -217,11 +240,11 @@ class SeatItem(QGraphicsObject):
 
     def r_person(self) -> QRectF:
         """人和椅子那一块:右键它 = 对这个人下命令(上班 / 下班)。"""
-        return QRectF(25, 40, 34, 74)
+        return QRectF(23, 50, 40, 66)
 
     def r_files(self) -> QRectF:
         """桌上那叠文件:一张纸 = 一条历史会话,右键它挑会话。"""
-        return QRectF(98, 69, 45, 28)
+        return QRectF(111, 65, 46, 28)
 
     def hit(self, pos: QPointF) -> str:
         """局部坐标 → "speaker" / "person" / "files" / "seat"。
@@ -267,13 +290,13 @@ class SeatItem(QGraphicsObject):
         glow = QColor(st.glow)
         p.setPen(Qt.PenStyle.NoPen)
 
-        # 有新消息:整张工位罩一层状态色光晕。白模场景里这比「把屏幕调亮」显眼得多
-        if flash:
-            halo = QColor(glow)
-            halo.setAlpha(52)
-            p.setBrush(QBrush(halo))
-            p.drawRoundedRect(QRectF(6, 10, SEAT_W - 12, SEAT_H - 16), 14, 14)
-        elif self._hover:
+        # 有新消息:**只闪屏幕**,不罩整张工位。整张闪太吵——一屋子人里有两三个在
+        # 等你,画面就有两三大块在呼吸;屏幕本来就是这张图上唯一的亮色块,闪它已经
+        # 够跳了,而且「状态」和「在等你」都落在同一个物件上,不打架。
+        screen_col = SCREEN_OFF
+        if present:
+            screen_col = mix(glow, QColor("#ffffff"), 0.5) if flash else glow
+        if self._hover:
             p.setBrush(QBrush(QColor(255, 255, 255, 170)))
             p.drawRoundedRect(QRectF(6, 10, SEAT_W - 12, SEAT_H - 16), 14, 14)
 
@@ -345,27 +368,36 @@ class SeatItem(QGraphicsObject):
 
         # 显示器:立在桌子里侧(y 小),**屏幕朝左前**,正对着坐在那边的人
         p.save()
-        _on(p, ISO_FX, MON_X, 6, 49)
+        _on(p, ISO_FX, MON_X, MON_Y, 29 + MON_H)    # 底边压在支架上(z=29)
         p.setBrush(QBrush(BEZEL))
-        p.drawRoundedRect(QRectF(0, 0, MON_W, 20), 1.5, 1.5)
-        p.setBrush(QBrush(glow if present else SCREEN_OFF))
-        p.drawRoundedRect(QRectF(1, 1.2, MON_W - 2, 16.4), 1, 1)
+        p.drawRoundedRect(QRectF(0, 0, MON_W, MON_H), 1.5, 1.5)
+        p.setBrush(QBrush(screen_col))
+        p.drawRoundedRect(QRectF(1, 1.2, MON_W - 2, MON_H - 3.6), 1, 1)
         if present:
             p.setBrush(QBrush(QColor(255, 255, 255, 145)))
-            for i, wu in enumerate((10, 6, 11)):
-                p.drawRect(QRectF(2.6, 3.6, wu, 1.4).translated(0, i * 4))
+            p.save()
+            # 裁到屏幕面上:滚出上沿的那行得切掉,不然会画到边框和桌面上去。
+            # (裁剪跟着当前变换走,所以这里裁出来的是个平行四边形,正好贴合屏幕。)
+            p.setClipRect(QRectF(1, 1.2, MON_W - 2, MON_H - 3.6))
+            span = len(self._lines) * LINE_GAP
+            for i, wu in enumerate(self._lines):
+                y = 2.4 + i * LINE_GAP - self._scroll
+                if y < 1.2 - LINE_GAP:      # 滚到上面去了 → 从底下再进来
+                    y += span
+                p.drawRect(QRectF(2.6, y, wu, 1.4))
+            p.restore()
         p.restore()
         p.setBrush(QBrush(BEZEL))                   # 支架 + 底座
-        stand = _pt(MON_X + MON_W / 2, 6, 29)
+        stand = _pt(MON_X + MON_W / 2, MON_Y, 29)
         p.drawRect(QRectF(stand.x() - 2.5, stand.y(), 5, 3))
         p.save()
-        _on(p, ISO_TOP, MON_X + MON_W / 2 - 2.5, 4, 26.4)
-        p.drawRoundedRect(QRectF(0, 0, 5, 4), 1.2, 1.2)
+        _on(p, ISO_TOP, MON_X + MON_W / 2 - 3, MON_Y - 2.5, 26.4)
+        p.drawRoundedRect(QRectF(0, 0, 6, 5), 1.2, 1.2)
         p.restore()
 
         # 键盘 + 鼠标:摆在显示器**前面**(y 大 = 离人近),正好是坐着那人手的位置
         p.save()
-        _on(p, ISO_TOP, 13, 13, 26.3)
+        _on(p, ISO_TOP, 16, 13, 26.3)
         p.setBrush(QBrush(KEYBOARD))
         p.drawRoundedRect(QRectF(0, 0, 15, 5), 1, 1)
         p.setBrush(QBrush(KEY))                     # 三道键位,不然只是块深色板子
@@ -373,12 +405,12 @@ class SeatItem(QGraphicsObject):
             p.drawRect(QRectF(1, 1 + i * 1.3, 13, 0.6))
         p.restore()
         p.save()                                    # 键盘前沿的厚度
-        _on(p, ISO_FX, 13, 18, 26.3)
+        _on(p, ISO_FX, 16, 18, 26.3)
         p.setBrush(QBrush(KEYBOARD))
         p.drawRect(QRectF(0, 0, 15, 1.2))
         p.restore()
         p.save()
-        _on(p, ISO_TOP, 29.5, 15, 26.3)
+        _on(p, ISO_TOP, 31, 15, 26.3)
         p.setBrush(QBrush(KEYBOARD))
         p.drawRoundedRect(QRectF(0, 0, 3, 4.2), 1.4, 1.4)   # 鼠标
         p.restore()
@@ -432,7 +464,7 @@ class SeatItem(QGraphicsObject):
             n = min(3, self._papers)
             for i in range(n):
                 p.save()
-                _on(p, ISO_TOP, 39 - i * 0.6, 9 - i * 0.6, 26.3 + i * 0.9)
+                _on(p, ISO_TOP, 40.5 - i * 0.6, 3.5 - i * 0.6, 26.3 + i * 0.9)
                 p.setPen(QPen(PAPER_EDGE, 0.6))     # 白纸压木桌,勾条暖灰边才有厚度
                 p.setBrush(QBrush(PAPER))
                 p.drawRoundedRect(QRectF(0, 0, 10, 12), 0.9, 0.9)   # 竖放:y 向更长
@@ -454,6 +486,8 @@ class SeatItem(QGraphicsObject):
         hub = _pt(HX, HY, 0)
         p.setBrush(QBrush(SHADOW))
         p.drawEllipse(QRectF(hub.x() - 23, hub.y() - 11, 46, 22))
+        if present:                             # 腿在椅子**之前**画,见 person 里的说明
+            person.draw_sitting_legs(p, self.color, HX, HY + 1.5)
         p.setPen(QPen(CHAIR_LEG, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         import math                                 # 五爪:在房间平面上均分五个方向再投影
         feet = [(HX + 7.5 * math.cos(t), HY + 7.5 * math.sin(t))
