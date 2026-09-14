@@ -6,8 +6,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPointF
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtWidgets import QApplication, QGraphicsSceneMouseEvent
 
 from claude_cockpit.config import Member
 from claude_cockpit.office.seat_item import UP_STATES, STATE_STYLE, SeatItem
@@ -257,3 +257,75 @@ def test_screen_scroll_wraps(app, seat):
     for _ in range(500):
         seat.advance_scroll()
         assert 0 <= seat._scroll < span
+
+
+def _press_at(pos: QPointF) -> QGraphicsSceneMouseEvent:
+    ev = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    ev.setPos(pos)
+    ev.setButton(Qt.MouseButton.LeftButton)
+    return ev
+
+
+def test_no_phone_without_history(seat):
+    """一条记录都没有就不画手机:桌面不多一块杂物。"""
+    assert not seat.has_phone()
+    assert seat.hit(seat.r_phone().center()) != "phone"
+
+
+def test_phone_appears_with_history(seat):
+    seat.set_history(3, 1)
+    assert seat.has_phone()
+    assert seat.hit(seat.r_phone().center()) == "phone"
+
+
+def test_phone_hit_rect_disjoint_from_others(seat):
+    """四块命中区两两不相交——叠了就会「点手机弹控制台」这种串台。"""
+    seat.set_history(3, 1)
+    seat.set_session_count(3)
+    rects = {"phone": seat.r_phone(), "person": seat.r_person(),
+             "speaker": seat.r_speaker(), "files": seat.r_files()}
+    names = sorted(rects)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            assert not rects[a].intersects(rects[b]), f"{a} 和 {b} 的命中区叠了"
+
+
+def test_phone_tooltip_counts(seat):
+    seat.set_history(3, 1)
+    seat._sync_tip("phone")
+    assert "3 条对话记录" in seat.toolTip()
+    assert "1 条未读" in seat.toolTip()
+    seat.set_history(3, 0)
+    seat._sync_tip("phone")
+    assert "未读" not in seat.toolTip()
+
+
+def test_phone_click_emits(seat):
+    got = []
+    seat.phone_clicked.connect(got.append)
+    seat.set_history(2, 0)
+    seat.set_run_state("idle")
+    seat.mousePressEvent(_press_at(seat.r_phone().center()))
+    assert got == [seat.name]
+
+
+def test_phone_click_does_not_raise_console(seat):
+    """点手机只开记录窗,不该顺带把控制台弹到眼前(clicked 是那件事)。"""
+    raised = []
+    seat.clicked.connect(raised.append)
+    seat.set_history(2, 0)
+    seat.set_run_state("idle")
+    seat.mousePressEvent(_press_at(seat.r_phone().center()))
+    assert raised == []
+
+
+def test_phone_paints_in_every_state(seat):
+    """画一遍别炸(包括未上班那档整体置灰)。"""
+    from PySide6.QtGui import QImage, QPainter
+    seat.set_history(3, 2)
+    for st in ("down", "launching", "busy", "idle", "running"):
+        seat.set_run_state(st)
+        img = QImage(240, 200, QImage.Format.Format_ARGB32)
+        p = QPainter(img)
+        seat.paint(p, None, None)
+        p.end()

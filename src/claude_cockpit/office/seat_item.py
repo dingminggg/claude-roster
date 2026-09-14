@@ -34,7 +34,8 @@ from .theme import (
     BEZEL, CHAIR, CHAIR_DARK, DESK_FRONT, DESK_FRONT_OFF, DESK_LEG, DESK_TOP,
     CHAIR_LEG, DESK_SHADE, DESK_TOP_OFF, DIM, DRAWER_LINE, KEY, KEYBOARD, MUG, NO_BG, NO_FG,
     OFF_OPACITY, PARTITION, PARTITION_TOP, SCREEN_OFF,
-    PAPER, PAPER_EDGE, PAPER_LINE, SHADOW, SPEAKER, SPEAKER_CONE, SPEAKER_SIDE, WAVE, SHADOW_HARD, TXT, YES_BG,
+    PAPER, PAPER_EDGE, PAPER_LINE, PHONE_BODY, PHONE_DOT, PHONE_SCREEN,
+    PHONE_SIDE, SHADOW, SPEAKER, SPEAKER_CONE, SPEAKER_SIDE, WAVE, SHADOW_HARD, TXT, YES_BG,
     YES_FG, mix,
 )
 
@@ -71,6 +72,20 @@ PAPER_W, PAPER_H = 17.0, 15.0           # 一张纸多大(房间单位)
 PAPER_LEN = PAPER_W * 2.2361            # 纸上那行字的可用长度(px)
 # 一叠里每张错开多少。纸放大之后 0.6 个单位看不出是「一叠」,得跟着纸一起放大。
 PAPER_STEP = 1.4
+
+# 桌上那部手机 = 「这个员工跟人说过话」(会话间消息);有没看过的就在角上亮颗红点。
+# **位置是算出来的,不是随手摆的**:桌面上只剩「桌子左端、人的左手边」这一块空档,
+# 两侧各卡着一块现成的命中区——r_speaker(x≥51)在右上、r_person(y≥50)在下方,
+# 所以手机的屏幕包围盒必须同时 x_max < 51 且 y_max < 50。
+# 按 _pt(x,y,z) = (62+(x-y)*2, 52+(x+y)-z) 把四角 × 两个 z(底 PHONE_Z、顶
+# PHONE_Z+PHONE_T)投一遍、再各留 1px,算出来是 x 26.6..49.6 / y 35.0..48.9,
+# 离 r_speaker 还剩 1.4px、离 r_person 还剩 1.1px。
+# **改这几个数必须重跑「命中区两两不相交」那条用例**——差一点就会串台成
+# 「点手机弹控制台」。长边(H)顺着 y:手机是长条,不是方块。
+PHONE_X, PHONE_Y = 0.5, 11.2        # 落点(房间坐标)
+PHONE_W, PHONE_H = 4.0, 6.5         # 短边 × 长边
+PHONE_T = 1.4                       # 机身厚(等距下露出来的那两个立面就是它)
+PHONE_Z = 26.3                      # 躺在桌面上(和键盘同一层)
 
 # 「起来了」的状态:明暗、手型、屏幕闪统一按它判断,别散着写 == "running"
 UP_STATES = ("running", "busy", "idle")
@@ -125,6 +140,7 @@ class SeatItem(QGraphicsObject):
 
     clicked = Signal(str)               # 点工位:置前该成员的控制台
     speaker_clicked = Signal(str)       # 点 🔊:停止朗读
+    phone_clicked = Signal(str)         # 点桌上那部手机:打开这个员工的对话记录
     moved = Signal(str)                 # 拖完:该存盘了
 
     # 椅子中心(房间坐标)。paint 和命中区都从这里取,别各写一份。
@@ -144,6 +160,8 @@ class SeatItem(QGraphicsObject):
         self._papers = 0                # 桌上那叠文件的张数 = 历史会话条数
         self._papers_on = True          # 这个工位有没有文件堆(运维那张没有)
         self._tag = ""                  # 最上面那张纸上印的 issue 号(认不出就留白)
+        self._hist = 0                  # 跟人说过几句(会话间消息)= 桌上摆不摆手机
+        self._hist_unread = 0           # 其中没看过的几条 = 手机角上那颗红点
         self._wave = 0                  # 音浪动画的相位(朗读时才转)
         self._scroll = 0.0              # 屏幕滚动的偏移(忙的时候才转)
         k = sum(ord(c) for c in self.name) % len(SCREEN_LINES)
@@ -182,6 +200,21 @@ class SeatItem(QGraphicsObject):
             self._svc_states[name] = st
         self._sync_tip()
         self.update()
+
+    # ---------- 桌上那部手机(对话记录) ----------
+    def set_history(self, count: int, unread: int = 0) -> None:
+        """跟人说过几句、其中几条没看过。一条都没有就不摆手机——桌面不多一块杂物。"""
+        count = max(0, int(count))
+        unread = max(0, int(unread))
+        if (count, unread) != (self._hist, self._hist_unread):
+            self._hist, self._hist_unread = count, unread
+            self._sync_tip()
+            self.update()
+
+    def has_phone(self) -> bool:
+        """**paint 和 hit 都走这一个判断**,别各写一份 `if self._hist`(那两处
+        迟早对不上,就成了「桌上没画手机、那块地却点得出手机」)。"""
+        return self._hist > 0
 
     def has_rack(self) -> bool:
         return bool(self._services)
@@ -295,6 +328,10 @@ class SeatItem(QGraphicsObject):
             tip = rack_item.tooltip(self._services, self._svc_states)
         elif where == "person":
             tip = f"{self.name} · {self.status_text()}"
+        elif where == "phone":
+            tip = f"{self._hist} 条对话记录"
+            if self._hist_unread:
+                tip += f"({self._hist_unread} 条未读)"
         elif where == "files":
             n = self._papers
             tip = f"{self._title or self._sub}" + (f"(共 {n} 条历史会话)" if n else "")
@@ -349,6 +386,24 @@ class SeatItem(QGraphicsObject):
         return QRectF(min(xs) - 2, min(ys) - 2,
                       max(xs) - min(xs) + 4, max(ys) - min(ys) + 4)
 
+    def r_phone(self) -> QRectF:
+        """桌上那部手机(桌子左端、人的左手边):点它开对话记录。
+
+        同 r_files:数值由 PHONE_* 那几个常量算出来(四角 × 两个 z 取 min/max),
+        手机一挪这里自动跟着走。余量只留 **1px**——左右两边分别贴着音响和人那两块
+        命中区,留 2px 就叠上了(那叠纸离谁都远,所以它留的是 2)。
+        """
+        xs, ys = [], []
+        for x, y in ((PHONE_X, PHONE_Y), (PHONE_X + PHONE_W, PHONE_Y),
+                     (PHONE_X, PHONE_Y + PHONE_H),
+                     (PHONE_X + PHONE_W, PHONE_Y + PHONE_H)):
+            for z in (PHONE_Z, PHONE_Z + PHONE_T):
+                q = _pt(x, y, z)
+                xs.append(q.x())
+                ys.append(q.y())
+        return QRectF(min(xs) - 1, min(ys) - 1,
+                      max(xs) - min(xs) + 2, max(ys) - min(ys) + 2)
+
     def r_rack(self) -> QRectF:
         """桌上那台小机柜(只有运维那张工位有):右键它复制服务地址。"""
         return rack_item.hit_rect()
@@ -367,6 +422,8 @@ class SeatItem(QGraphicsObject):
             return "rack"
         if self.has_papers() and self.r_files().contains(pos):
             return "files"
+        if self.has_phone() and self.r_phone().contains(pos):
+            return "phone"
         return "seat"
 
     # ---------- 小人 ----------
@@ -571,6 +628,35 @@ class SeatItem(QGraphicsObject):
         p.drawEllipse(QRectF(top.x() - 4.5, top.y() + 3.5, 9, 4.5))
         p.drawEllipse(QRectF(top.x() - 4.5, top.y() - 2.2, 9, 4.5))
 
+        # 桌上那部手机:躺在桌子左端、人的左手边(桌面上唯一还空着的一块)。
+        # **等距下一个盒子该露三个面**:顶(= 屏幕)+ 左前 + 右前,少画一面就塌成
+        # 一张纸片(音响踩过这个坑)。有没看过的消息就在**右上角**亮颗红点——
+        # 它不闪,半拍一闪那拍归显示器,两样都闪反而看不出谁在叫你。
+        if self.has_phone():
+            z_top = PHONE_Z + PHONE_T
+            p.save()                                    # 左前立面(近侧长边)
+            _on(p, ISO_FX, PHONE_X, PHONE_Y + PHONE_H, z_top)
+            p.setBrush(QBrush(PHONE_SIDE))
+            p.drawRect(QRectF(0, 0, PHONE_W, PHONE_T))
+            p.restore()
+            p.save()                                    # 右前立面(短边)
+            _on(p, ISO_FY, PHONE_X + PHONE_W, PHONE_Y, z_top)
+            p.setBrush(QBrush(PHONE_SIDE))
+            p.drawRect(QRectF(0, 0, PHONE_H, PHONE_T))
+            p.restore()
+            p.save()                                    # 顶面:机身边框 + 里面那块屏
+            _on(p, ISO_TOP, PHONE_X, PHONE_Y, z_top)
+            p.setBrush(QBrush(PHONE_BODY))
+            p.drawRoundedRect(QRectF(0, 0, PHONE_W, PHONE_H), 0.7, 0.7)
+            p.setBrush(QBrush(PHONE_SCREEN))
+            p.drawRoundedRect(QRectF(0.5, 0.6, PHONE_W - 1.0, PHONE_H - 1.4), 0.4, 0.4)
+            p.restore()
+            if self._hist_unread:
+                # 红点画在屏幕坐标里(圆没有朝向问题,切进等距面反而会压成椭圆)
+                d = _pt(PHONE_X + PHONE_W - 0.7, PHONE_Y + 0.8, z_top)
+                p.setBrush(QBrush(PHONE_DOT))
+                p.drawEllipse(d, 2.0, 2.0)
+
         # 桌上一叠文件:一张纸 = 一条历史会话,最上面那张印着 issue 号。
         # 摆在**显示器右侧**(x 大)。**别画小**:这块是右键「接着这条继续 /
         # 删除这条记录」的唯一入口,小了点不着(命中区 r_files 直接按这里的
@@ -683,8 +769,13 @@ class SeatItem(QGraphicsObject):
             # 右键只该弹菜单,不挡掉会被当成「点工位」把控制台最大化。
             e.ignore()
             return
-        if self.hit(e.pos()) == "speaker":
+        where = self.hit(e.pos())       # 判一次就够,别每支各调一遍 hit
+        if where == "speaker":
             self.speaker_clicked.emit(self.name)
+            e.accept(); return
+        if where == "phone":
+            # 点手机**只开记录窗**:不往下走 clicked,不然会顺带把控制台弹到眼前。
+            self.phone_clicked.emit(self.name)
             e.accept(); return
         if self.is_up():
             self.clicked.emit(self.name)
