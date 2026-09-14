@@ -208,6 +208,8 @@ class OfficeWindow(QMainWindow):
             self.ops = OpsItem()    # 人画在柜子和桌子之上(他会走到它们跟前)
             self.ops.setParentItem(area)
             self.ops.setZValue(1)
+            self.ops.phase_changed.connect(self._on_ops_phase)
+            self._on_ops_phase(self.ops.phase())
             self._place_ops()
         self.refit_scene()
         # 窗口尺寸和镜头都只在第一次装配时设:rebuild 每次增删改成员都会跑,
@@ -248,6 +250,13 @@ class OfficeWindow(QMainWindow):
             self._snap(item)
         self._place_ops()
         self._queue_save()
+
+    def _on_ops_phase(self, phase: str) -> None:
+        """运维回到工位 → 由**工位**把人画上(坐姿要和椅子穿插,跨两个图元排不了
+        画序);离开 → 工位画空椅子。和员工跑腿送信时同一套口径。"""
+        at_desk = phase == "desk"
+        if self.ops_desk is not None:
+            self.ops_desk.set_occupied(at_desk)
 
     def _place_ops(self) -> None:
         """把运维的两个落脚点(工位的椅子、柜子正前方)喂给他。
