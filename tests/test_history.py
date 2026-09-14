@@ -1,9 +1,10 @@
 """会话间对话记录:cc_signals 里那条只进不出的历史通道(append_history /
-read_history / history_stat,以及裁剪)。按员工组装和 hook 落盘是后续任务,
-不在这个文件测。"""
+read_history / history_stat,以及裁剪),以及 message_sent hook 同时落
+事件通道 + 历史通道这一层接线。按员工组装是后续任务,不在这个文件测。"""
 from pathlib import Path
 
 from claude_cockpit import cc_signals
+from claude_cockpit.hooks import message_sent
 
 
 def test_history_roundtrip(tmp_path, monkeypatch):
@@ -94,3 +95,25 @@ def test_history_stat_changes_after_append(tmp_path, monkeypatch):
     first = cc_signals.history_stat()
     cc_signals.append_history(r"C:\proj\fad", "etl-7a", "二")
     assert first is not None and cc_signals.history_stat() != first
+
+
+def test_hook_writes_event_and_history(tmp_path, monkeypatch):
+    """一次 SendMessage 要同时落:事件(驱动动画)+ 历史(过后查得到)。"""
+    monkeypatch.setattr(cc_signals, "messages_dir", lambda: tmp_path / "messages")
+    monkeypatch.setattr(cc_signals, "history_path", lambda: tmp_path / "history.jsonl")
+    message_sent.handle({
+        "tool_name": "SendMessage",
+        "cwd": r"C:\proj\fad",
+        "tool_input": {"to": "etl-7a", "message": "跑一下昨天的单子"},
+    })
+    assert [r["to_name"] for r in cc_signals.take_messages()] == ["etl-7a"]
+    hist = cc_signals.read_history()
+    assert [(r["to_name"], r["text"]) for r in hist] == [("etl-7a", "跑一下昨天的单子")]
+
+
+def test_hook_ignores_other_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(cc_signals, "messages_dir", lambda: tmp_path / "messages")
+    monkeypatch.setattr(cc_signals, "history_path", lambda: tmp_path / "history.jsonl")
+    message_sent.handle({"tool_name": "Bash", "cwd": r"C:\proj\fad",
+                         "tool_input": {"to": "etl-7a", "message": "x"}})
+    assert cc_signals.read_history() == []

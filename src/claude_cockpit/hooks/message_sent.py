@@ -1,5 +1,6 @@
 """PostToolUse hook(匹配 SendMessage 工具):某个会话给另一个会话发了消息 → 记一笔,
-驾驶舱看到就让发送方的小人走过去说一句再走回来。
+驾驶舱看到就让发送方的小人走过去说一句再走回来;同时落一条长期历史记录,供过后
+翻旧账用(事件通道读一次删一次,历史通道只进不出,两条互不影响)。
 
 **为什么用 hook 而不是直接监听**:会话之间的消息走的是 `~/.claude/sessions/*.json` 里
 那个 `messagingSocketPath` 命名管道,那是 Claude Code 的内部协议、不是公开契约(同
@@ -36,6 +37,9 @@ def handle(payload: dict) -> None:
     text = str(tool_input.get("message") or "")
     if to_name and cwd:
         cc_signals.write_message(cwd, to_name, text)
+        # 再落一条**长期**记录:事件读一次就没了,而桌上那部手机要能翻旧账。
+        # 两条通道互不影响——一条只进不出,一条读一次删一次。
+        cc_signals.append_history(cwd, to_name, text)
 
 
 def main() -> int:
