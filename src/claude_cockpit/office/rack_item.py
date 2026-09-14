@@ -5,9 +5,8 @@
 搬到桌上之后那趟路就没意义了:柜子就在他手边。所以这里只导出**画法和命中区**,
 由 `seat_item` 在运维那张工位上调用;状态变了他在工位上冒个气泡说一句。
 
-**一台机柜装下所有服务**,一层 1U = 一个服务(右端一颗灯)。桌面尺寸下**印不下
-服务名**了(整台柜子才 9 个房间单位宽),所以哪一层是谁只在悬停提示里说;
-柜灯负责「有没有出事」,要看是哪一个就悬停、或者等他冒气泡点名。
+**一台机柜装下所有服务**。层高是被「层上要印得下服务名」倒推的:柜门在 ISO_FX
+面上,那个面的纵轴 1 个单位 = 1 屏幕像素,所以字有多高、层就至少有多厚。
 
 状态语义和工位「屏幕色 = 运行状态」完全一致:绿 = 端口听得到、灭 = 没在跑、
 琥珀半拍一闪 = 端口在但不搭理你。画面上不写状态文字,文字版在悬停提示里。
@@ -20,7 +19,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 
 from ..services import DOWN, STUCK, UP
-from .iso import ISO_FX, ISO_TEXT_TOP
+from .iso import ISO_FX, ISO_TEXT_FX, ISO_TEXT_TOP
 from .iso import pt as _pt
 from .iso import on as _on          # 用工位那套固定原点:柜子就摆在工位的桌面上
 from .iso import quad as _quad
@@ -31,7 +30,7 @@ from .theme import (
 
 # 桌上那台小机柜的房间尺寸和落点。摆在**显示器右边**(x 大那头)、桌面上(z=26)。
 # 尺寸得压得够小:它是桌上的一样东西,大了就又变回落地机柜、把显示器比下去。
-RX, RY, RZ = 19.0, 18.0, 20.0
+RX, RY, RZ = 19.0, 18.0, 34.0
 RACK_X, RACK_Y, RACK_Z = 42.0, 2.0, 26.0        # 桌面在 z=26
 # 尺寸 = **办公桌右半边那块桌面**(显示器右边到桌子右端,连桌子的整个进深):
 # 小了就是个不起眼的盒子,看不出是机柜。
@@ -40,15 +39,26 @@ RACK_X, RACK_Y, RACK_Z = 42.0, 2.0, 26.0        # 桌面在 z=26
 # 柜子的 x 上,结果柜子顶面的左角比那还靠左,照样盖。所以工位名改**印在柜门上**
 # (像服务器上的标签),屏风那块由 seat_item 跳过不画。
 
-SLOT_H, SLOT_GAP = 2.8, 1.3     # 一层的厚度 / 层间距(房间单位)
+# 一层的厚度 / 层间距(房间单位)。**层高是被「层上要印得下服务名」倒推的**:
+# 柜门在 ISO_FX 面上,那个面的纵轴 1 个单位 = 1 屏幕像素,6pt 的字要 8px,
+# 所以一层至少 8.6 个单位高——柜子也因此从 20 长到 34(三层就占 30)。
+SLOT_H, SLOT_GAP = 8.6, 1.4
 SLOT_Z0 = 2.0                   # 最下面那层离柜底多高
-BLANK_SLOTS = 1                 # 服务之外再留一层空槽:机柜本来就有空位
+# **不再留空槽**:层高撑到 8.6 之后,多一层空的就要再高 10 个单位,柜子会比
+# 显示器还高一截,反客为主。
+BLANK_SLOTS = 0
 
-LABEL_LEN = (RX - 3.0) * 2.2361     # 柜门上那行字的可用长度(沿板方向 1 单位 = 2.2361px)
+# 沿板方向 1 个房间单位 = 2.2361px(横 2、竖 1)。两行字各有各的地盘:
+LABEL_LEN = (RX - 3.0) * 2.2361     # 柜顶那张标签(工位名)
+SLOT_LEN = (RX - 4.0 - 1.6) * 2.2361    # 层上那行服务名:右端到灯为止
+#   ↑ 灯在房间 x = RX-4,名字从 x+1.6 起;沿板方向 1 单位 = 2.2361px
 
 FONT_LABEL = QFont()                # 模块级:paint 每帧重建 QFont 要走字体匹配查找
 FONT_LABEL.setPointSize(7)
 FONT_LABEL.setBold(True)
+FONT_SLOT = QFont()                 # 层上的服务名:比标签再小一档才塞得进
+FONT_SLOT.setPointSize(6)
+FONT_SLOT.setBold(True)
 
 STATE_TEXT = {UP: "运行中", DOWN: "没在跑", STUCK: "无响应"}
 LED = {UP: LED_UP, DOWN: LED_DOWN, STUCK: LED_STUCK}
@@ -129,7 +139,7 @@ def draw(p: QPainter, services, states: dict, blink: bool = True,
     for i in range(rows):
         zz = z + SLOT_Z0 + i * (SLOT_H + SLOT_GAP)
         svc = services[rows - 1 - i] if (rows - 1 - i) < len(services) else None
-        p.save()
+        p.save()                        # ① 横板和灯:画在 ISO_FX 面上,u 是**房间单位**
         _on(p, ISO_FX, x + 1.0, y + RY, zz + SLOT_H)
         p.setBrush(QBrush(slot))
         p.drawRect(QRectF(0, -SLOT_H, RX - 2.0, SLOT_H))
@@ -139,8 +149,21 @@ def draw(p: QPainter, services, states: dict, blink: bool = True,
             if st == STUCK and not blink and not dim:
                 led = mix(led, QColor("#ffffff"), 0.5)      # 异常:半拍一闪
             p.setBrush(QBrush(led))
-            p.drawRect(QRectF(RX - 4.4, -SLOT_H + 0.7, 1.8, SLOT_H - 1.4))
+            p.drawRect(QRectF(RX - 4.0, -SLOT_H / 2 - 1.6, 1.8, 3.2))
         p.restore()
+        if svc is None:
+            continue
+        p.save()                        # ② 服务名:**必须另起一个 ISO_TEXT_FX 块**
+        # 直接写在上面那个 ISO_FX 块里,字会被横向拉成两倍宽、糊出柜门(踩过)。
+        # 这个面的 u 是**沿板方向的像素**、v 是屏幕往下的像素,和上面那套不通用。
+        _on(p, ISO_TEXT_FX, x + 1.6, y + RY, zz + SLOT_H)
+        p.setPen(QPen(mix(RACK_NAME, RACK_SLOT, 0.55) if dim else RACK_NAME))
+        p.setFont(FONT_SLOT)
+        p.drawText(QRectF(0, 0.6, SLOT_LEN, SLOT_H - 1.2),
+                   int(Qt.AlignmentFlag.AlignLeft
+                       | Qt.AlignmentFlag.AlignVCenter), svc.name)
+        p.restore()
+        p.setPen(Qt.PenStyle.NoPen)
 
     if label:
         # 工位名印在**柜顶**上(像机箱上贴的那张标签),不印在柜门上:柜门那一条
