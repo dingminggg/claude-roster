@@ -104,19 +104,68 @@ def test_rebuild_drops_walkers(app, office):
     assert office._walkers == []
 
 
+def _run(w, ms):
+    """跑够 ms 毫秒(图元被摘掉就停)。"""
+    from claude_cockpit.office import walker_item as wi
+    for _ in range(int(ms // wi.TICK_MS) + 1):
+        if w.scene() is None:
+            return
+        w._step()
+
+
+def _until(w, phase, cap_ms=30000):
+    """一直跑到进入 `phase` 那一拍——各拍时长不一样,按毫秒硬算容易多跑一拍。"""
+    from claude_cockpit.office import walker_item as wi
+    for _ in range(int(cap_ms // wi.TICK_MS)):
+        if w._phase == phase or w.scene() is None:
+            return
+        w._step()
+
+
 def test_walker_walks_then_disappears(app, office):
-    """走过去 → 停下说话 → 走回来 → 自己从场景里消失。"""
-    from claude_cockpit.office import walker_item
-    office.send_walker("fad", "etl")
+    """走过去 → 开窗打字 → 停住让人读 → 收窗 → 走回来 → 自己从场景里消失。"""
+    from claude_cockpit.office import walker_item as wi
+    office.send_walker("fad", "etl", "改好了")
     w = office._walkers[0]
     start = w.pos()
-    for _ in range(walker_item.OUT_MS // walker_item.TICK_MS + 1):
-        w._step()
+    _run(w, wi.OUT_MS)
     assert w.pos() != start and not w.is_walking()       # 到了,站住说话
-    for _ in range((walker_item.WAIT_MS + walker_item.OUT_MS)
-                   // walker_item.TICK_MS + 4):
-        w._step()
+    _run(w, wi.OPEN_MS + w._type_ms + w._hold_ms + wi.CLOSE_MS + wi.OUT_MS + 200)
     assert w.scene() is None                             # 走完自己摘掉
+
+
+def test_the_window_opens_then_types_then_holds(app, office):
+    """四拍:开窗 → 一个字一个字打 → 停住让人读 → 收窗。"""
+    from claude_cockpit.office import walker_item as wi
+    office.send_walker("fad", "etl", "改好了")
+    w = office._walkers[0]
+    _run(w, wi.OUT_MS)
+    assert w._phase == "open" and w._grow() < 1.0        # 窗口先展开,字还没出
+    _until(w, "type")
+    assert w._phase == "type"
+    first = w._reveal()
+    _run(w, wi.TYPE_MS_PER_CHAR * 2)
+    assert w._reveal() > first                           # 字在一个个往外冒
+    _until(w, "hold")
+    assert w._reveal() == w._chars                       # 打完了,全文停住
+    assert w._hold_ms == wi.HOLD_MS                      # 停 5 秒让人读完
+    _until(w, "close")
+    w._step()                                            # 刚进这一拍时还是满格
+    assert w._grow() < 1.0                               # 再收回去
+
+
+def test_walking_is_slow_enough_to_notice(app, office):
+    """走得慢一点:1.5 秒那版像在赶路,一眼扫过去只看见有东西闪过。"""
+    from claude_cockpit.office import walker_item as wi
+    assert wi.OUT_MS >= 2500
+
+
+def test_a_wordless_message_does_not_hold_for_five_seconds(app, office):
+    """没正文时只冒三个点,没什么可读的,不用停这么久。"""
+    from claude_cockpit.office import walker_item as wi
+    office.send_walker("fad", "etl")
+    w = office._walkers[0]
+    assert w._chars == 0 and w._hold_ms == wi.DOTS_HOLD_MS
 
 
 def test_walk_path_goes_around_desks(app, office):
@@ -199,8 +248,8 @@ def test_bubble_grows_with_the_text(app, office):
     assert talky._bh > quiet._bh
     # 包围盒跟着气泡长,否则长气泡会被裁掉一块
     assert talky.boundingRect().height() > quiet.boundingRect().height()
-    # 停留时间按字数算:一句「好了」和一段说明给同样的时间要么干等、要么没读完
-    assert talky._wait_ms > quiet._wait_ms
+    # 打字那一拍按字数算:话越长,打得越久
+    assert talky._type_ms > quiet._type_ms
 
 
 def test_walker_paints_its_bubble(app, office):

@@ -25,14 +25,19 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from . import bubble, person
 
-OUT_MS = 1500           # 单程
+# 单程走多久。**走得慢一点**:1.5 秒那版像在赶路,一眼扫过去只看见有东西闪过。
+OUT_MS = 3000
 TICK_MS = 40
 
-# 到了之后停住说话的那一下。**停多久按字数算**——一句「好了」和一段两行的说明,
-# 给同样的时间要么是干等、要么根本没读完。
-WAIT_MS = 900           # 没正文时只冒三个点,停这么久就够
-READ_MS_PER_CHAR = 55
-WAIT_MAX_MS = 4200
+# 到了之后那一段,分四拍演:
+#   开窗 → 一个字一个字打 → 停住让人读 → 关窗
+# 「窗口先展开、字后一个个出」是有意的:框跟着字一起长的话,每多一个字框就抖
+# 一下,读起来像在挣扎。
+OPEN_MS = 220                   # 消息窗口展开
+TYPE_MS_PER_CHAR = 55           # 每个字
+HOLD_MS = 5000                  # 打完停住让人读
+CLOSE_MS = 180                  # 收回去
+DOTS_HOLD_MS = 1200             # 没正文时只冒三个点,不用停这么久
 
 
 class WalkerItem(QGraphicsObject):
@@ -40,8 +45,9 @@ class WalkerItem(QGraphicsObject):
         super().__init__()
         self.color = QColor(color)
         self._lines = bubble.wrap(text)
-        self._wait_ms = (min(WAIT_MAX_MS, 900 + len(text) * READ_MS_PER_CHAR)
-                         if self._lines else WAIT_MS)
+        self._chars = bubble.total_chars(self._lines)
+        self._type_ms = self._chars * TYPE_MS_PER_CHAR
+        self._hold_ms = HOLD_MS if self._lines else DOTS_HOLD_MS
         self._bw, self._bh = bubble.size(self._lines)
         self._path = [QPointF(q) for q in path]
         # 每段的累计长度:按**长度**在折线上取点,不按段数——不然长段走得飞快、
@@ -52,7 +58,8 @@ class WalkerItem(QGraphicsObject):
             self._acc.append(self._acc[-1] + (d.x() ** 2 + d.y() ** 2) ** 0.5)
         self._total = self._acc[-1] or 1.0
         self._elapsed = 0
-        self._phase = "out"                 # out → wait → back → (删除)
+        # out → open → type → hold → close → back →(自己从场景里摘掉)
+        self._phase = "out"
         self.setZValue(60)                  # 走在地毯和工位上面
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
         self.setPos(self._path[0])
@@ -61,19 +68,25 @@ class WalkerItem(QGraphicsObject):
         self._timer.start(TICK_MS)
 
     # ---------- 动画 ----------
+    # 每一拍走完就把 _elapsed 清零,下一拍自己从 0 开始数——各拍的时长互不相干,
+    # 加一拍只要在这张表里插一行。
+    _NEXT = {"open": "type", "type": "hold", "hold": "close", "close": "back"}
+
+    def _phase_ms(self) -> int:
+        return {"out": OUT_MS, "open": OPEN_MS, "type": self._type_ms,
+                "hold": self._hold_ms, "close": CLOSE_MS, "back": OUT_MS}[self._phase]
+
     def _step(self) -> None:
         self._elapsed += TICK_MS
+        done = self._elapsed >= self._phase_ms()
         if self._phase == "out":
-            if self._elapsed >= OUT_MS:
-                self._phase, self._elapsed = "wait", 0
+            if done:
                 self.setPos(self._path[-1])
+                self._phase, self._elapsed = "open", 0
             else:
                 self.setPos(self._lerp(self._elapsed / OUT_MS))
-        elif self._phase == "wait":
-            if self._elapsed >= self._wait_ms:
-                self._phase, self._elapsed = "back", 0
-        else:
-            if self._elapsed >= OUT_MS:
+        elif self._phase == "back":
+            if done:
                 self._timer.stop()
                 sc = self.scene()
                 if sc is not None:
@@ -81,7 +94,23 @@ class WalkerItem(QGraphicsObject):
                 self.deleteLater()
                 return
             self.setPos(self._lerp(1.0 - self._elapsed / OUT_MS))
+        elif done:                      # 站着说话那几拍:到点就翻到下一拍
+            self._phase, self._elapsed = self._NEXT[self._phase], 0
         self.update()
+
+    def _grow(self) -> float:
+        """消息窗口展开/收回的进度(0~1)。"""
+        if self._phase == "open":
+            return self._elapsed / OPEN_MS
+        if self._phase == "close":
+            return max(0.0, 1.0 - self._elapsed / CLOSE_MS)
+        return 1.0
+
+    def _reveal(self) -> int:
+        """打到第几个字了。打完那一拍之后一直显示全文。"""
+        if self._phase == "type":
+            return int(self._elapsed / TYPE_MS_PER_CHAR) if self._chars else 0
+        return self._chars
 
     def _lerp(self, t: float) -> QPointF:
         """按走过的**路程比例**在折线上取点。"""
@@ -96,7 +125,7 @@ class WalkerItem(QGraphicsObject):
         return QPointF(self._path[-1])
 
     def is_walking(self) -> bool:
-        return self._phase != "wait"
+        return self._phase in ("out", "back")
 
     def bob(self) -> float:
         """走路时身体上下起伏 1.5px;站着说话时不动。"""
@@ -116,5 +145,6 @@ class WalkerItem(QGraphicsObject):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(Qt.PenStyle.NoPen)
         person.draw_standing(p, self.color, 0.0, 0.0, bob=self.bob())
-        if self._phase == "wait":           # 到了就冒个说话气泡
-            bubble.draw(p, self._lines, QPointF(0, -56))
+        if not self.is_walking():           # 到了就开个消息窗口,把话打出来
+            bubble.draw(p, self._lines, QPointF(0, -56),
+                        grow=self._grow(), reveal=self._reveal())

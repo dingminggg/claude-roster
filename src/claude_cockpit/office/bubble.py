@@ -81,16 +81,32 @@ def height(lines: list[str]) -> float:
     return size(lines)[1] + TAIL_H
 
 
-def draw(p: QPainter, lines: list[str], tip: QPointF) -> None:
-    """把气泡画在 `tip` 上方(尖尖正好落在 tip 上)。"""
+def total_chars(lines: list[str]) -> int:
+    return sum(len(ln) for ln in lines)
+
+
+def draw(p: QPainter, lines: list[str], tip: QPointF,
+         grow: float = 1.0, reveal: int | None = None) -> None:
+    """把气泡画在 `tip` 上方(尖尖正好落在 tip 上)。
+
+    `grow` 0~1:窗口展开的进度——**框先按最终大小的比例长开、字后出**,不是让框
+    跟着字一起变大:那样每多一个字框就抖一下,读起来像在挣扎。
+    `reveal`:显示前几个字(None = 全部),用来做一个字一个字打出来的效果。
+    """
     bw, bh = size(lines)
-    rect = QRectF(tip.x() - bw / 2, tip.y() - TAIL_H - bh, bw, bh)
+    grow = max(0.05, min(1.0, grow))
+    w, h = bw * grow, bh * grow
+    bottom = tip.y() - TAIL_H
+    rect = QRectF(tip.x() - w / 2, bottom - h, w, h)
     p.setBrush(QBrush(PAPER))       # 纸白:气泡多半压在地毯或桌面上,
     p.setPen(QPen(BEZEL, 1))        # 用同色的话只剩一圈描边撑着
-    p.drawRoundedRect(rect, 5, 5)
+    p.drawRoundedRect(rect, 5 * grow, 5 * grow)
     p.drawPolygon(QPolygonF([QPointF(tip.x() - 3, rect.bottom() - 0.5),
                              QPointF(tip.x() + 3, rect.bottom() - 0.5),
                              QPointF(tip.x(), tip.y())]))
+    if grow < 0.999:                # 还在展开:先只有个框
+        p.setPen(Qt.PenStyle.NoPen)
+        return
     if not lines:                   # 没正文:老三点
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(TXT))
@@ -100,10 +116,15 @@ def draw(p: QPainter, lines: list[str], tip: QPointF) -> None:
         return
     p.setPen(QPen(TXT))
     p.setFont(FONT)
+    left = total_chars(lines) if reveal is None else max(0, reveal)
     y = rect.top() + PAD
     for line in lines:
+        if left <= 0:
+            break
+        shown = line if left >= len(line) else line[:left]
+        left -= len(line)
         p.drawText(QRectF(rect.left() + PAD, y, bw - PAD * 2, LINE_H),
                    int(Qt.AlignmentFlag.AlignLeft
-                       | Qt.AlignmentFlag.AlignVCenter), line)
+                       | Qt.AlignmentFlag.AlignVCenter), shown)
         y += LINE_H
     p.setPen(Qt.PenStyle.NoPen)
