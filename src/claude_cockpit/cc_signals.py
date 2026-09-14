@@ -234,6 +234,89 @@ def take_messages(max_age_seconds: int = 30) -> list[dict]:
     return out
 
 
+# ── 「对话记录」历史:和 messages 同一批数据,但**只进不出**。──
+# messages 是事件(读一次删一次、超 30s 丢),给的是「现在演一段动画」;这条给的是
+# 「过后还查得到」——桌上那部手机点开看的就是它。写在一个 JSONL 里:一行一条,
+# **append 而不是 tempfile+os.replace**——几个会话同时发消息时,原子替换会互相
+# 覆盖掉整个文件,而单行 append(< 4K)在同一台机上是安全的。
+
+
+def history_path() -> Path:
+    return data_dir() / "history.jsonl"
+
+
+HISTORY_MAX = 2000      # 留最近这么多条,超了截掉最老的一半(单文件 + 裁剪,不轮转)
+HIST_TEXT_MAX = 2000    # 单条正文上限。MSG_MAX=140 只管气泡,记录窗要看全文
+
+
+def append_history(from_cwd: str, to_name: str, text: str = "") -> None:
+    """记一笔「谁给谁发了什么」的**长期**记录(异常全吞,同其余信号:hook 绝不能
+    把 Claude 拖崩)。`to_name` 是**会话名**,反查成员工名是读取侧的事。"""
+    if not from_cwd or not to_name:
+        return
+    rec = {
+        "from_cwd": safe_text(from_cwd),
+        "to_name": safe_text(to_name),
+        # 换行压成空格:记录窗是自己排版的,原文换行会把一条撑成一长条
+        "text": " ".join(safe_text(text).split())[:HIST_TEXT_MAX],
+        "at": time.time(),
+    }
+    p = history_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        _trim_history(p)
+    except Exception:
+        pass
+
+
+def _trim_history(p: Path) -> None:
+    """超了才读全量重写一次,平时只 append。"""
+    try:
+        lines = [ln for ln in p.read_text(encoding="utf-8",
+                                          errors="replace").splitlines() if ln.strip()]
+        if len(lines) <= HISTORY_MAX:
+            return
+        keep = lines[len(lines) // 2:]
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text("\n".join(keep) + "\n", encoding="utf-8")
+        os.replace(tmp, p)
+    except Exception:
+        pass
+
+
+def read_history() -> list[dict]:
+    """[{from_cwd, to_name, text, at}, ...],按写入顺序。坏行逐行跳过、文件缺失
+    返回空,**绝不抛**(同 peers/layout 的口径:记录是便利功能)。"""
+    try:
+        raw = history_path().read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return []
+    out: list[dict] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(rec, dict) and rec.get("from_cwd") and rec.get("to_name"):
+            out.append(rec)
+    return out
+
+
+def history_stat() -> tuple[float, int] | None:
+    """(mtime, size);文件不在返回 None。办公室拿它判断「这轮要不要重读」——
+    一秒一轮全量读一个几百 K 的文件没必要。"""
+    try:
+        st = history_path().stat()
+    except OSError:
+        return None
+    return (st.st_mtime, st.st_size)
+
+
 # ── 「正在朗读」信号:TTS(~/.claude/hooks/tts_stop.py)播放某会话回复期间写入,播完删。──
 # 记录含 {cwd, pid}:cwd 用来匹配成员显示 🔊,pid 让消费方自愈(播放进程没了就丢弃,不会常亮)。
 # 只读,不写(写在 TTS 脚本侧)。
