@@ -55,14 +55,8 @@ def for_member(records, member, addrs, members=()) -> list[Entry]:
             continue
         if not me_sess or to_name != me_sess:
             continue
-        sender_name = cwd_to_member.get(norm_path(from_cwd))
-        if sender_name is None:
-            # 发送方不在花名册里(外部工具/未知目录):没歧义,直接用目录名兜底。
-            out.append(Entry("in", _dir_name(from_cwd), text, at))
-        elif addrs.get(sender_name):
-            # 发送方是花名册里的员工,且当前会话地址仍然有效——不是陈旧残留。
-            out.append(Entry("in", sender_name, text, at))
-        # 发送方是员工但当前查不到地址(会话已结束/换了新会话):当作陈旧记录跳过。
+        peer = cwd_to_member.get(norm_path(from_cwd)) or _dir_name(from_cwd)
+        out.append(Entry("in", peer, text, at))
     out.sort(key=lambda e: e.at)
     return out
 

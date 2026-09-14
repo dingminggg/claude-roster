@@ -155,10 +155,20 @@ def test_for_member_sorted_by_time():
 
 
 def test_out_peer_falls_back_to_session_name():
-    """收件人的会话已经结束(addrs 里没了)→ 原样显示会话名,不猜。"""
+    """收件人的会话已经结束(addrs 里没了)→ **那条发出去的**原样显示会话名,不猜;
+    收到的那条不受影响——记录是既成事实,不能因为对方会话结束就从记录里消失。"""
     ms = _members()
     got = history.for_member(_recs(), ms[0], {"fad": "fad-backend-2-f3"}, ms)
-    assert [(e.direction, e.peer) for e in got] == [("out", "etl-7a")]
+    assert [(e.direction, e.peer) for e in got] == [("out", "etl-7a"), ("in", "etl")]
+
+
+def test_in_kept_when_sender_session_ended():
+    """发送方的会话结束了,收到过的记录**不能**跟着消失——cwd 是稳的,名字照样查得到。"""
+    ms = _members()
+    recs = [{"from_cwd": r"C:\proj\etl-pipeline", "to_name": "fad-backend-2-f3",
+             "text": "跑完了", "at": 20.0}]
+    got = history.for_member(recs, ms[0], {"fad": "fad-backend-2-f3"}, ms)
+    assert [(e.direction, e.peer) for e in got] == [("in", "etl")]
 
 
 def test_in_peer_falls_back_to_dir_name():
