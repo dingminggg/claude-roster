@@ -22,6 +22,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def safe_text(x) -> str:
+    """把字符串里写不进 UTF-8 的东西(孤立代理字符)换掉。
+
+    **为什么需要**:这几处写信号按设计是「异常全吞」——写失败就当没这条。那条设计
+    没问题(hook 绝不能把 Claude 拖崩),但代价是**一个坏字符能让整条信号无声消失**,
+    还查不出来。所以写之前先把字符串洗一遍:宁可丢一个字,也不能丢整条信号。
+    (真正的病根是 hook 那边按本地编码读 stdin,已在 `hooks/_payload.py` 修掉;
+    这里是第二道闸——以后谁再往里塞一段没洗过的文本,也不至于静默丢事件。)
+    """
+    return str(x or "").encode("utf-8", errors="replace").decode("utf-8")
+
+
 def data_dir() -> Path:
     return Path.home() / ".claude" / "data" / "claude-cockpit"
 
@@ -47,9 +59,9 @@ def _atomic_write(d: Path, session_id: str, message: str, cwd: str) -> None:
     d.mkdir(parents=True, exist_ok=True)
     target = d / f"{_safe_name(session_id)}.json"
     payload = {
-        "session_id": session_id,
-        "message": message,
-        "cwd": cwd,
+        "session_id": safe_text(session_id),
+        "message": safe_text(message),
+        "cwd": safe_text(cwd),
         "at": datetime.now(timezone.utc).isoformat(),
     }
     fd, tmp_path = tempfile.mkstemp(prefix=".cc-", suffix=".json", dir=str(d))
@@ -183,9 +195,9 @@ def write_message(from_cwd: str, to_name: str, text: str = "") -> None:
     d = messages_dir()
     d.mkdir(parents=True, exist_ok=True)
     # 换行压成空格:气泡是自己排版的,原文里的换行会把它撑成一长条。
-    body = " ".join(str(text or "").split())[:MSG_MAX]
-    payload = {"from_cwd": from_cwd, "to_name": to_name, "text": body,
-               "at": time.time()}
+    body = " ".join(safe_text(text).split())[:MSG_MAX]
+    payload = {"from_cwd": safe_text(from_cwd), "to_name": safe_text(to_name),
+               "text": body, "at": time.time()}
     fd, tmp = tempfile.mkstemp(prefix=".cc-", suffix=".json", dir=str(d))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

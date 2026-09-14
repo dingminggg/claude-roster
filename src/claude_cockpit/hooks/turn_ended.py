@@ -10,6 +10,8 @@ import json
 import sys
 import traceback
 
+from ._payload import read_payload
+
 from claude_cockpit import cc_signals
 
 
@@ -23,9 +25,9 @@ def handle(payload: dict) -> None:
 
 def main() -> int:
     try:
-        raw = sys.stdin.read()
-        if raw.strip():
-            handle(json.loads(raw))
+        payload = read_payload()        # **按 UTF-8 读**,别用 sys.stdin(见 _payload.py)
+        if payload is not None:
+            handle(payload)
     except Exception:
         print("claude-cockpit turn_ended hook error:", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)

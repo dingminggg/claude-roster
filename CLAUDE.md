@@ -21,7 +21,7 @@
 ```bash
 # 启动(无窗后台)
 C:\Users\LQ\PhpstormProjects\claude-cockpit\.venv\Scripts\pythonw.exe -m claude_cockpit.main
-# 测试(238 个)
+# 测试(243 个)
 QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest -q
 # 离屏装配自检(把 QApplication.exec 打桩成返回 0,跑 main() 看 rc 0)。
 # ⚠ 跑之前先确认没有 cockpit 在跑:main() 开头的单实例探测发现已有实例会直接
@@ -63,7 +63,7 @@ desk-buddy 通过环境变量 `CLAUDE_COCKPIT_PY` 指向本项目的 pythonw 来
 - **office/view.py** — `OfficeWindow`:场景装配、按部门落座、Ctrl+滚轮缩放、**右键菜单(全部操作的唯一入口:启动 / 续接会话 / 删会话记录 / 复制地址 / 打开目录 / 编辑 / 删除)**、布局存盘(400ms 防抖 + `closeEvent` 兜底)、`refit_scene`(sceneRect 只比内容大一圈窄边:留一大片空地会让东西越拖越散、最后一眼看不全)、`fit_content` / `_fit_if_needed`(缩放到刚好看全;**只在装不下时**才自动缩,还装得下就别动镜头——否则拖完一个工位镜头就自己跳)。**方法名和信号名与退休的 `panel.Panel` 完全一致**,所以 `main.py` 只需换构造类;`set_order` 是空操作(位置由用户摆,排序无意义)。右键菜单由 `build_menu()` 单独搭出来(不在 `contextMenuEvent` 里现搭——`exec` 阻塞,不抽出来没法单测)。`set_always_on_top` 有守卫:值没变就 return、只有本来可见才 `show()`(无条件 show 会把托盘里隐藏着的窗口硬弹出来)。
 - **tray_popup.py** — `TrayPopup`:托盘悬停时弹出的无边框小浮层,列出有消息的员工。原住在 `panel.py`,卡片列表退休时搬出来单过。
 - **assets.py** — 自带资源路径(`ICON_PATH`)。图标既给托盘也给窗口用,不该继续挂在某个具体界面模块下面。
-- **hooks/** — `turn_ended.py`(Stop 写)、`clear.py`(UserPromptSubmit 清)。
+- **hooks/** — `turn_ended.py`(Stop 写)、`clear.py`(UserPromptSubmit 清)、`notify.py`(Notification 写 pending)、`message_sent.py`(PostToolUse 记「谁给谁发了什么」)。**四个都走 `_payload.read_payload()` 读 stdin,别用 `sys.stdin.read()`**:Claude Code 发的负载是 **UTF-8**,而 Windows 上 `sys.stdin` 按**本地编码**(这台机是 GBK)解——正文里只要有中文就被拆成**孤立代理字符**,json 照样解析得出、看着一切正常,但再往 UTF-8 文件里写就抛 `UnicodeEncodeError`;而写信号那几处按设计「异常全吞」,于是**整条信号静默消失、还没有任何报错可查**。表现:中文消息发出去了小人不动、中文通知来了屏幕不闪(踩过,查了很久才定位到 stdin 的编码)。`cc_signals.safe_text()` 是第二道闸——写之前把字符串洗一遍,宁可丢一个字也不丢整条信号。
 - **main.py** — 装配:配置/办公室(`OfficeWindow`)/轮询(1s tick + 200ms 启动轮询 + 550ms 托盘闪 & 工位屏幕闪)/窗口管理/托盘/单实例。
 
 ## 信号双通道(关键设计,别搞混)
