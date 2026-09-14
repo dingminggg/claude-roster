@@ -272,16 +272,29 @@ def append_history(from_cwd: str, to_name: str, text: str = "") -> None:
 
 
 def _trim_history(p: Path) -> None:
-    """超了才读全量重写一次,平时只 append。"""
+    """超了才读全量重写一次,平时只 append。
+
+    **刻意接受的取舍**:这里是「读全量 → 重写 → os.replace」,不加锁。如果在读到
+    lines 之后、replace 落地之前,别的进程刚好 append 了一行,那一行会被这次裁剪
+    悄悄吃掉——裁剪几千条才发生一次,为它上锁不值,而这条通道本身按设计就允许丢
+    (记录是便利功能,不是不丢包的账本)。
+    """
     try:
         lines = [ln for ln in p.read_text(encoding="utf-8",
                                           errors="replace").splitlines() if ln.strip()]
         if len(lines) <= HISTORY_MAX:
             return
         keep = lines[len(lines) // 2:]
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text("\n".join(keep) + "\n", encoding="utf-8")
-        os.replace(tmp, p)
+        fd, tmp = tempfile.mkstemp(prefix=".cc-", suffix=".jsonl", dir=str(p.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(keep) + "\n")
+            os.replace(tmp, p)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     except Exception:
         pass
 

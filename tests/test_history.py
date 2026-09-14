@@ -1,4 +1,6 @@
-"""会话间对话记录:历史通道(只进不出)、按员工组装、hook 落两处。"""
+"""会话间对话记录:cc_signals 里那条只进不出的历史通道(append_history /
+read_history / history_stat,以及裁剪)。按员工组装和 hook 落盘是后续任务,
+不在这个文件测。"""
 from pathlib import Path
 
 from claude_cockpit import cc_signals
@@ -38,6 +40,16 @@ def test_history_skips_bad_lines(tmp_path, monkeypatch):
         fh.write("这行不是 json\n\n")
     # 坏行逐行跳过,绝不抛:记录是便利功能,不能因为它打不开办公室
     assert [r["text"] for r in cc_signals.read_history()] == ["好的那条"]
+
+
+def test_history_skips_bad_line_in_middle(tmp_path, monkeypatch):
+    p = tmp_path / "history.jsonl"
+    monkeypatch.setattr(cc_signals, "history_path", lambda: p)
+    cc_signals.append_history(r"C:\proj\fad", "etl-7a", "前面那条")
+    with open(p, "a", encoding="utf-8") as fh:
+        fh.write("这行不是 json\n")
+    cc_signals.append_history(r"C:\proj\fad", "etl-7a", "后面那条")
+    assert [r["text"] for r in cc_signals.read_history()] == ["前面那条", "后面那条"]
 
 
 def test_history_text_truncated(tmp_path, monkeypatch):
