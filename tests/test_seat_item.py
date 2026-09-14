@@ -204,7 +204,7 @@ def test_hit_regions_are_semantic(app, seat):
 def test_files_only_exist_when_there_are_sessions(app, seat):
     """没有历史会话就没有那叠文件,那块地方当普通桌面。"""
     seat.set_run_state("down")
-    at_files = QPointF(134, 79)
+    at_files = QPointF(134, 95)
     assert seat.hit(at_files) == "seat"
     seat.set_session_count(3)
     assert seat.hit(at_files) == "files"

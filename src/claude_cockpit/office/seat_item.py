@@ -16,14 +16,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF, QTransform,
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from ..layout import SEAT_H, SEAT_W
-from . import person
+from . import bubble, person, rack_item
 from .iso import DESK_X, DESK_Y, ISO_FX, ISO_FY, ISO_TEXT_FX, ISO_TOP
 from .iso import on as _on
 from .iso import pt as _pt
@@ -131,6 +131,13 @@ class SeatItem(QGraphicsObject):
         k = sum(ord(c) for c in self.name) % len(SCREEN_LINES)
         self._lines = SCREEN_LINES[k:] + SCREEN_LINES[:k]
         self._hover = False
+        # 桌上那台小机柜:只有运维那张工位有(`view` 给它喂服务清单)。
+        self._services: list = []
+        self._svc_states: dict[str, str] = {}
+        self._say: list[str] = []           # 正在说的那句话(折好行的)
+        self._say_timer = QTimer(self)      # 自带表:说完自己收回去
+        self._say_timer.setSingleShot(True)
+        self._say_timer.timeout.connect(lambda: self.say(""))
         self._press_pos = None          # 按下时的位置,用来判断松手时是否真挪过
         # 只要可拖,**不要 ItemIsSelectable**:Qt 拖一个图元时会把所有「选中的」
         # 可移动图元一起拖走。工位可选的话,点过它之后再拖地毯,它会既作为子项
@@ -146,13 +153,51 @@ class SeatItem(QGraphicsObject):
         self._sync_tip()
         self.update()
 
+    # ---------- 桌上的机柜(只有运维那张工位有) ----------
+    def set_services(self, svcs) -> None:
+        self._services = list(svcs)
+        self._sync_tip()
+        self.update()
+
+    def set_service_states(self, states: dict) -> None:
+        for name, st in (states or {}).items():
+            self._svc_states[name] = st
+        self._sync_tip()
+        self.update()
+
+    def has_rack(self) -> bool:
+        return bool(self._services)
+
+    def service_report(self) -> str:
+        return rack_item.report(self._services, self._svc_states)
+
+    def rack_all_green(self) -> bool:
+        return rack_item.all_green(self._services, self._svc_states)
+
+    def say(self, text: str, ms: int = 0) -> None:
+        """在工位上冒个气泡说一句(`text` 为空 = 收回气泡)。
+
+        **停多久按字数算**——一句「都正常」和一段点名三个服务的话,给同样的时间
+        要么干等、要么根本没读完(同送信小人那条)。
+        """
+        self.prepareGeometryChange()        # 气泡比工位框高,包围盒要跟着变
+        self._say = bubble.wrap(text)
+        self._say_timer.stop()
+        if self._say:
+            self._say_timer.start(ms or min(6000, 1600 + len(text) * 90))
+        self.update()
+
+    def is_saying(self) -> bool:
+        return bool(self._say)
+
     def set_message(self, on: bool) -> None:
         self._msg = bool(on)
         self.update()
 
     def set_blink(self, on: bool) -> None:
         self._blink = bool(on)
-        if self.is_flashing() or self._msg:
+        if (self.is_flashing() or self._msg
+                or rack_item.any_stuck(self._services, self._svc_states)):
             self.update()
 
     def set_away(self, on: bool) -> None:
@@ -207,7 +252,9 @@ class SeatItem(QGraphicsObject):
         """悬停提示按落点给不同的信息:画面上不写状态和会话标题(那会把白模
         场景堆满字),但悬停要查得到——鼠标停在人身上问「他在干嘛」,
         停在文件堆上问「这是哪条会话」。"""
-        if where == "person":
+        if where == "rack":
+            tip = rack_item.tooltip(self._services, self._svc_states)
+        elif where == "person":
             tip = f"{self.name} · {self.status_text()}"
         elif where == "files":
             n = self._papers
@@ -230,7 +277,11 @@ class SeatItem(QGraphicsObject):
 
     # ---------- 命中区 ----------
     def boundingRect(self) -> QRectF:
-        return QRectF(0, 0, SEAT_W, SEAT_H)
+        """工位框;正在说话时往上让出气泡那一块(不让的话气泡会被裁掉半截)。"""
+        r = QRectF(0, 0, SEAT_W, SEAT_H)
+        if self._say:
+            r.setTop(-bubble.height(self._say) - 6)
+        return r
 
     # 三块命中区的数值 = 对应家具在 _pt 投影下的包围盒。改了家具的房间坐标,
     # 这里必须跟着改——paint 和 hit 对不上,就会「点纸弹控制台」。三块互不重叠。
@@ -244,7 +295,11 @@ class SeatItem(QGraphicsObject):
 
     def r_files(self) -> QRectF:
         """桌上那叠文件:一张纸 = 一条历史会话,右键它挑会话。"""
-        return QRectF(111, 65, 46, 28)
+        return QRectF(116, 85, 48, 26)
+
+    def r_rack(self) -> QRectF:
+        """桌上那台小机柜(只有运维那张工位有):右键它复制服务地址。"""
+        return rack_item.hit_rect()
 
     def hit(self, pos: QPointF) -> str:
         """局部坐标 → "speaker" / "person" / "files" / "seat"。
@@ -256,6 +311,8 @@ class SeatItem(QGraphicsObject):
             return "speaker"
         if self.r_person().contains(pos):
             return "person"
+        if self._services and self.r_rack().contains(pos):
+            return "rack"
         if self._papers and self.r_files().contains(pos):
             return "files"
         return "seat"
@@ -457,14 +514,15 @@ class SeatItem(QGraphicsObject):
         p.drawEllipse(QRectF(top.x() - 4.5, top.y() + 3.5, 9, 4.5))
         p.drawEllipse(QRectF(top.x() - 4.5, top.y() - 2.2, 9, 4.5))
 
-        # 桌上一叠文件:一张纸 = 一条历史会话。摆在**显示器右侧**(x 大)。
+        # 桌上一叠文件:一张纸 = 一条历史会话。摆在桌子的**近右角**——
+        # 「显示器右边」那块地让给了机柜(运维那张工位上),两样挤在一起命中区会打架。
         # **别画小**:这块是右键「接着这条继续 / 删除这条记录」的唯一入口,
         # 小了不好点(命中区 r_files 也跟着这里的尺寸走)。
         if self._papers:
             n = min(3, self._papers)
             for i in range(n):
                 p.save()
-                _on(p, ISO_TOP, 40.5 - i * 0.6, 3.5 - i * 0.6, 26.3 + i * 0.9)
+                _on(p, ISO_TOP, 50.0 - i * 0.6, 10.0 - i * 0.6, 26.3 + i * 0.9)
                 p.setPen(QPen(PAPER_EDGE, 0.6))     # 白纸压木桌,勾条暖灰边才有厚度
                 p.setBrush(QBrush(PAPER))
                 p.drawRoundedRect(QRectF(0, 0, 10, 12), 0.9, 0.9)   # 竖放:y 向更长
@@ -475,6 +533,12 @@ class SeatItem(QGraphicsObject):
                     p.drawRect(QRectF(2, 5.4, 3.8, 0.9))
                 p.restore()
             p.setPen(Qt.PenStyle.NoPen)
+
+        # 桌上那台小机柜(只有运维那张工位有):摆在**显示器右边**。
+        # 画在文件堆之后、人之前——它比人离镜头远,画在人后面会被前面的东西盖住。
+        if self._services:
+            rack_item.draw(p, self._services, self._svc_states,
+                           blink=self._blink, dim=not present)
 
         # ============ 椅子和人 ============
         # 坐在桌子的左前方(y 大 = 离镜头近),面朝桌子,所以我们看到的是后脑勺和椅背。
@@ -523,6 +587,9 @@ class SeatItem(QGraphicsObject):
         if not present:
             p.restore()                             # 收掉上面那层给空椅子的淡化
 
+        if self._say:       # 气泡:压在所有东西之上,尖尖落在人头顶稍上方
+            bubble.draw(p, self._say, QPointF(SEAT_W * 0.33, 18.0))
+
 
 
     # ---------- 交互 ----------
@@ -536,6 +603,13 @@ class SeatItem(QGraphicsObject):
 
     def hoverLeaveEvent(self, e):
         self._hover = False
+        # 桌上那台小机柜:只有运维那张工位有(`view` 给它喂服务清单)。
+        self._services: list = []
+        self._svc_states: dict[str, str] = {}
+        self._say: list[str] = []           # 正在说的那句话(折好行的)
+        self._say_timer = QTimer(self)      # 自带表:说完自己收回去
+        self._say_timer.setSingleShot(True)
+        self._say_timer.timeout.connect(lambda: self.say(""))
         self.update()
 
     def mousePressEvent(self, e):

@@ -23,86 +23,26 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
-from . import person
-from .theme import BEZEL, PAPER, TXT
+from . import bubble, person
 
 OUT_MS = 1500           # 单程
 TICK_MS = 40
 
-# 气泡:到了之后停住说话的那一下。**停多久按字数算**——一句「好了」和一段两行的
-# 说明,给同样的时间要么是干等、要么根本没读完。
+# 到了之后停住说话的那一下。**停多久按字数算**——一句「好了」和一段两行的说明,
+# 给同样的时间要么是干等、要么根本没读完。
 WAIT_MS = 900           # 没正文时只冒三个点,停这么久就够
 READ_MS_PER_CHAR = 55
 WAIT_MAX_MS = 4200
-
-BUBBLE_W = 168.0        # 气泡最宽多少(再宽就盖住旁边的工位了)
-BUBBLE_PAD = 6.0
-BUBBLE_LINES = 3        # 最多几行,超了末行省略号
-LINE_H = 12.0
-TAIL_H = 6.0            # 气泡底下那个小尖
-
-FONT_MSG = QFont()      # 模块级:paint 每帧重建 QFont 要走字体匹配查找
-FONT_MSG.setPointSize(7)
-_FM = QFontMetricsF(FONT_MSG)
-
-
-def _break_at(line: str, nxt: str) -> tuple[str, str]:
-    """一行满了要换行:返回 (这一行, 退回去接着排的那截)。
-
-    **别把一个英文词从中间劈开**——按字符折的话 `ETL` 会排成「ET / L」,一眼就
-    看出是机器折的。所以当断点正好落在一串 ASCII 词里面时,退到它前面那个空格。
-    中文没这个问题(每个字都能断),所以只对 ASCII 串做这件事。
-    """
-    if not (line and line[-1].isascii() and line[-1].isalnum()
-            and nxt.isascii() and nxt.isalnum()):
-        return line, ""
-    cut = line.rfind(" ")
-    if cut <= 0:                    # 整行就是一个长词,劈开总比空着强
-        return line, ""
-    return line[:cut], line[cut + 1:]
-
-
-def wrap(text: str, width: float = BUBBLE_W - BUBBLE_PAD * 2,
-         lines: int = BUBBLE_LINES) -> list[str]:
-    """把一句话折成最多 `lines` 行,末行放不下就省略号。
-
-    **按字宽折、不按字数折**:中文一个字的宽度是英文的两倍,按字数折的话
-    「好的我这就去改」和「ok sure」会排成完全不同的长度(工位名牌那边同一条)。
-    """
-    text = " ".join(str(text or "").split())
-    if not text:
-        return []
-    out: list[str] = []
-    cur = ""
-    for ch in text:
-        if _FM.horizontalAdvance(cur + ch) <= width:
-            cur += ch
-            continue
-        done, carry = _break_at(cur, ch)
-        out.append(done)
-        cur = carry + ch
-        if len(out) == lines:               # 装不下了:末行收成省略号
-            last = out[-1]
-            while last and _FM.horizontalAdvance(last + "…") > width:
-                last = last[:-1]
-            out[-1] = last.rstrip() + "…"
-            return out
-    if cur:
-        out.append(cur)
-    return out[:lines]
 
 
 class WalkerItem(QGraphicsObject):
     def __init__(self, color: QColor, path: list[QPointF], text: str = ""):
         super().__init__()
         self.color = QColor(color)
-        self._lines = wrap(text)
+        self._lines = bubble.wrap(text)
         self._wait_ms = (min(WAIT_MAX_MS, 900 + len(text) * READ_MS_PER_CHAR)
                          if self._lines else WAIT_MS)
-        w = max((_FM.horizontalAdvance(ln) for ln in self._lines), default=0.0)
-        self._bw = w + BUBBLE_PAD * 2 if self._lines else 26.0
-        self._bh = (len(self._lines) * LINE_H + BUBBLE_PAD * 2
-                    if self._lines else 14.0)
+        self._bw, self._bh = bubble.size(self._lines)
         self._path = [QPointF(q) for q in path]
         # 每段的累计长度:按**长度**在折线上取点,不按段数——不然长段走得飞快、
         # 短段磨蹭,一趟路走出好几种速度。
@@ -169,7 +109,7 @@ class WalkerItem(QGraphicsObject):
         """人 + 头顶那个气泡。气泡按正文算大小,所以包围盒也得跟着算——
         写死的话长气泡会被裁掉一块(重画区域不够)。"""
         half = max(22.0, self._bw / 2 + 2)
-        top = -(56 + TAIL_H + self._bh + 4)
+        top = -(56 + bubble.height(self._lines) + 4)
         return QRectF(-half, top, half * 2, -top + 6)
 
     def paint(self, p: QPainter, opt, widget) -> None:
@@ -177,32 +117,4 @@ class WalkerItem(QGraphicsObject):
         p.setPen(Qt.PenStyle.NoPen)
         person.draw_standing(p, self.color, 0.0, 0.0, bob=self.bob())
         if self._phase == "wait":           # 到了就冒个说话气泡
-            self._bubble(p)
-
-    def _bubble(self, p: QPainter) -> None:
-        """头顶的说话气泡:有正文就把话写出来,没有(旧信号 / 空消息)就三个点。"""
-        bottom = -56.0                      # 尖尖底端:刚好在头顶上方
-        rect = QRectF(-self._bw / 2, bottom - TAIL_H - self._bh,
-                      self._bw, self._bh)
-        p.setBrush(QBrush(PAPER))      # 纸白:气泡多半压在地毯上,
-        p.setPen(QPen(BEZEL, 1))       # 用地毯色的话只剩一圈描边撑着
-        p.drawRoundedRect(rect, 5, 5)
-        p.drawPolygon(QPolygonF([QPointF(-3, rect.bottom() - 0.5),
-                                 QPointF(3, rect.bottom() - 0.5),
-                                 QPointF(0, bottom)]))
-        if not self._lines:                 # 没正文:老三点
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(TXT))
-            for i in range(3):
-                p.drawEllipse(QRectF(-7.5 + i * 5, rect.center().y() - 1.5, 3, 3))
-            return
-        p.setPen(QPen(TXT))
-        p.setFont(FONT_MSG)
-        y = rect.top() + BUBBLE_PAD
-        for line in self._lines:
-            p.drawText(QRectF(rect.left() + BUBBLE_PAD, y,
-                              self._bw - BUBBLE_PAD * 2, LINE_H),
-                       int(Qt.AlignmentFlag.AlignLeft
-                           | Qt.AlignmentFlag.AlignVCenter), line)
-            y += LINE_H
-        p.setPen(Qt.PenStyle.NoPen)
+            bubble.draw(p, self._lines, QPointF(0, -56))

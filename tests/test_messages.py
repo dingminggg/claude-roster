@@ -182,14 +182,13 @@ def test_old_signals_without_a_body_still_work(tmp_path, monkeypatch):
 
 def test_wrap_folds_by_pixel_width_not_character_count(app):
     """按字宽折:中文一个字是英文的两倍宽,按字数折两种话会排成完全不同的长度。"""
-    from claude_cockpit.office import walker_item as wi
-    assert wi.wrap("") == []
-    one = wi.wrap("短")
-    assert one == ["短"]
-    many = wi.wrap("啊" * 200)
-    assert len(many) == wi.BUBBLE_LINES and many[-1].endswith("…")
+    from claude_cockpit.office import bubble
+    assert bubble.wrap("") == []
+    assert bubble.wrap("短") == ["短"]
+    many = bubble.wrap("啊" * 200)
+    assert len(many) == bubble.MAX_LINES and many[-1].endswith("…")
     for line in many:
-        assert wi._FM.horizontalAdvance(line) <= wi.BUBBLE_W - wi.BUBBLE_PAD * 2
+        assert bubble.FM.horizontalAdvance(line) <= bubble.W - bubble.PAD * 2
 
 
 def test_bubble_grows_with_the_text(app, office):
