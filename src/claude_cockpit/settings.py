@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-_DEFAULTS = {"sound_enabled": True, "always_on_top": True}
+# seen_messages:每个员工「对话记录看到哪儿了」的时间水位 {员工名: epoch 秒}。
+# 桌上那部手机角上那颗红点按它亮(见 history.unread_count)。
+_DEFAULTS = {"sound_enabled": True, "always_on_top": True, "seen_messages": {}}
 
 
 def _path() -> Path:
@@ -24,7 +26,14 @@ def load() -> dict:
             data = {}
     except Exception:
         data = {}
-    return {**_DEFAULTS, **data}
+    merged = {**_DEFAULTS, **data}
+    # 坏数据退回缺省;即便类型对,只要它就是 _DEFAULTS["seen_messages"] 那个共享
+    # 实例(缺键时会被原样带出来),也要换成新 dict——否则调用方往里一写就污染了
+    # 模块级默认值,下次 load() 就不再是空的了。
+    seen = merged.get("seen_messages")
+    if not isinstance(seen, dict) or seen is _DEFAULTS["seen_messages"]:
+        merged["seen_messages"] = dict(seen) if isinstance(seen, dict) else {}
+    return merged
 
 
 def save(s: dict) -> None:
