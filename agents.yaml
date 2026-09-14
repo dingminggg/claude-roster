@@ -78,6 +78,12 @@ agents:
   color: '#3b82f6'
   permission_mode: default
   dept: 后勤
+- name: xiaomu
+  cwd: C:\Users\LQ\PhpstormProjects\xiaomu
+  emoji: 🌱
+  color: '#8b5cf6'
+  permission_mode: default
+  dept: 运营
 - name: ops
   cwd: C:\Users\LQ\PhpstormProjects\ops
   emoji: 🛠️
