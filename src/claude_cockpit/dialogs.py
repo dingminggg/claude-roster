@@ -13,7 +13,7 @@ MODELS = ["(默认)", "opus", "sonnet", "haiku"]
 def member_dialog(parent, member=None) -> dict | None:
     editing = member is not None
     dlg = QDialog(parent)
-    dlg.setWindowTitle("编辑成员" if editing else "添加成员")
+    dlg.setWindowTitle("编辑员工" if editing else "添加员工")
     form = QFormLayout(dlg)
 
     name = QLineEdit(member.name if editing else "")

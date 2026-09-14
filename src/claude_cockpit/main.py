@@ -358,10 +358,10 @@ def main() -> int:
         if name not in by_name:
             return
         if len(members) <= 1:
-            QMessageBox.warning(panel, "无法删除", "至少要保留一个成员。")
+            QMessageBox.warning(panel, "无法删除", "至少要保留一个员工。")
             return
-        if QMessageBox.question(panel, "删除成员",
-                                f"确定删除 @{name}?(只从面板移除,不动它的窗口/会话)") \
+        if QMessageBox.question(panel, "删除员工",
+                                f"确定删除 @{name}?(只从办公室移除,不动它的窗口/会话)") \
                 != QMessageBox.StandardButton.Yes:
             return
         members[:] = [m for m in members if m.name != name]
@@ -538,7 +538,7 @@ def main() -> int:
     # 托盘:显隐面板 / 提示音开关 / 退出(用多只小青蛙图标)
     tray = QSystemTrayIcon(icon, app)
     menu = QMenu()
-    menu.addAction("显示/隐藏面板",
+    menu.addAction("显示/隐藏办公室",
                    lambda: panel.hide() if not _panel_away() else _restore_panel())
 
     def _toggle_sound(checked: bool) -> None:
@@ -566,7 +566,7 @@ def main() -> int:
 
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)
-    tray.setToolTip("Claude 驾驶舱")
+    tray.setToolTip("Claude 办公室")
     # 左键/双击托盘图标 → 还原面板(顺手关掉悬停浮层)。不停闪:闪烁只由「逐个点掉成员」清。
     def _on_tray_activated(r) -> None:
         if r in (QSystemTrayIcon.ActivationReason.Trigger,
@@ -587,7 +587,7 @@ def main() -> int:
             if blink_state["on"]:
                 blink_state["on"] = False
             tray.setIcon(icon)
-            tray.setToolTip("Claude 驾驶舱")
+            tray.setToolTip("Claude 办公室")
             return
         blink_state["on"] = not blink_state["on"]
         tray.setIcon(_empty_icon if blink_state["on"] else icon)

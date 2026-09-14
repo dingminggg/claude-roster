@@ -278,7 +278,7 @@ def test_rename_area_moves_its_people(win):
 
 def test_canvas_menu_on_blank_offers_new_area(win):
     texts = [a.text() for a in win.build_canvas_menu(None).actions()]
-    assert "新增成员" in texts and "新建部门区域" in texts
+    assert "新增员工" in texts and "新建部门区" in texts
     assert not any(t.startswith("删除") for t in texts)
 
 

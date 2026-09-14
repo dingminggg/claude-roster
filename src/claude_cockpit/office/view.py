@@ -99,7 +99,7 @@ class OfficeWindow(QMainWindow):
 
     def __init__(self, members):
         super().__init__()
-        self.setWindowTitle("驾驶舱")
+        self.setWindowTitle("办公室")
         self.scene = QGraphicsScene(self)
         self.seats: dict[str, SeatItem] = {}
         self.areas: dict[str, DeptAreaItem] = {}
@@ -509,7 +509,7 @@ class OfficeWindow(QMainWindow):
             copy.triggered.connect(lambda: self.copy_address_requested.emit(name))
         else:
             copy.setEnabled(False)
-            copy.setToolTip("还没探到这个成员的会话地址(会话没起来或刚启动)")
+            copy.setToolTip("还没探到这个员工的会话地址(会话没起来或刚启动)")
         menu.addAction("打开目录").triggered.connect(
             lambda: self.open_dir_requested.emit(name))
         menu.addAction("编辑").triggered.connect(
@@ -524,9 +524,9 @@ class OfficeWindow(QMainWindow):
         和 build_menu 一样单独成方法——exec 阻塞,不抽出来没法单测。
         """
         menu = QMenu(self)
-        menu.addAction("新增成员").triggered.connect(self.add_requested.emit)
+        menu.addAction("新增员工").triggered.connect(self.add_requested.emit)
         at = (scene_pos.x(), scene_pos.y()) if scene_pos is not None else None
-        menu.addAction("新建部门区域").triggered.connect(
+        menu.addAction("新建部门区").triggered.connect(
             lambda: self._ask_new_area(at))
         if area:
             menu.addSeparator()
@@ -537,13 +537,13 @@ class OfficeWindow(QMainWindow):
             rm = menu.addAction(f"删除「{area}」")
             if occupied:
                 rm.setEnabled(False)
-                rm.setToolTip("这块地毯上还有人:先把工位拖到别的部门再删")
+                rm.setToolTip("这个部门区里还有人:先把工位拖到别的部门再删")
             else:
                 rm.triggered.connect(lambda: self.remove_area(area))
         return menu
 
     def _ask_new_area(self, at=None) -> None:
-        name, ok = QInputDialog.getText(self, "新建部门区域", "部门名")
+        name, ok = QInputDialog.getText(self, "新建部门区", "部门名")
         if ok:
             self.add_area(name, at)
 
