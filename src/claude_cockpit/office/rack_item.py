@@ -30,13 +30,14 @@ from .theme import (
 
 # 桌上那台小机柜的房间尺寸和落点。摆在**显示器右边**(x 大那头)、桌面上(z=26)。
 # 尺寸得压得够小:它是桌上的一样东西,大了就又变回落地机柜、把显示器比下去。
-RX, RY, RZ = 9.0, 7.0, 15.0
+RX, RY, RZ = 13.0, 9.0, 22.0
 RACK_X, RACK_Y, RACK_Z = 38.0, 3.0, 26.0        # 桌面在 z=26
-# **高度卡在 z=41 以下**:后屏风上那块名牌就从 41 起,柜子再高就顶掉名字的下半截。
-# 也因此那叠文件被挤到桌子近右角去了(两样都想占「显示器右边」,见 seat_item)。
+# 宽度按办公桌的短边(DESK_Y=22)来配:太小就成了个不起眼的小盒子,看不出是机柜。
+# 高度会盖到后屏风上那块名牌的左端一点点——运维的名字是固定的 `ops`、又是**右对齐**
+# 贴着屏风右端,正好躲开;换个长名字就会被柜子啃掉一截。
 
-SLOT_H, SLOT_GAP = 2.4, 1.0     # 一层的厚度 / 层间距(房间单位)
-SLOT_Z0 = 2.2                   # 最下面那层离柜底多高
+SLOT_H, SLOT_GAP = 3.4, 1.2     # 一层的厚度 / 层间距(房间单位)
+SLOT_Z0 = 2.5                   # 最下面那层离柜底多高
 BLANK_SLOTS = 1                 # 服务之外再留一层空槽:机柜本来就有空位
 
 STATE_TEXT = {UP: "运行中", DOWN: "没在跑", STUCK: "无响应"}
@@ -44,7 +45,7 @@ LED = {UP: LED_UP, DOWN: LED_DOWN, STUCK: LED_STUCK}
 
 # 命中区:上面那几个房间坐标在 _pt 投影下的包围盒(paint 和 hit 必须同源,
 # 各写一遍必然漂移——工位那三块命中区同一条规矩)。
-HIT = QRectF(116, 50, 36, 34)
+HIT = QRectF(112, 43, 48, 48)
 
 
 def hit_rect() -> QRectF:
@@ -116,5 +117,5 @@ def draw(p: QPainter, services, states: dict, blink: bool = True,
             if st == STUCK and not blink and not dim:
                 led = mix(led, QColor("#ffffff"), 0.5)      # 异常:半拍一闪
             p.setBrush(QBrush(led))
-            p.drawRect(QRectF(RX - 3.4, -SLOT_H + 0.5, 1.3, SLOT_H - 1.0))
+            p.drawRect(QRectF(RX - 4.4, -SLOT_H + 0.7, 1.8, SLOT_H - 1.4))
         p.restore()
