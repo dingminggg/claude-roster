@@ -159,6 +159,8 @@ class OfficeWindow(QMainWindow):
         live = {m.name for m in self._members}
         self._sessions = {k: v for k, v in self._sessions.items() if k in live}
         self._addrs = {k: v for k, v in self._addrs.items() if k in live}
+        # `_seen`(对话记录的已读水位)**故意不跟着筛**:同名员工重建时留着水位
+        # 才对——筛掉的话,他以前看过的那些消息会被当成新的再亮一次红点。
         raw = settings.load().get("office") or {}
         parsed = layout_mod.parse(raw)
         self._extra_depts |= {d for d in parsed.depts}
@@ -399,6 +401,14 @@ class OfficeWindow(QMainWindow):
             return
         self._hist_sig = sig
         self._hist = cc_signals.read_history()
+        self._apply_history()
+
+    def _apply_history(self) -> None:
+        """把手上这份记录铺到每张桌上的手机(几条 / 其中几条没看过)。
+
+        单独一个方法:水位一推,红点该当场灭,但那用的还是刚读进来的同一份记录
+        ——没必要为此再读一遍盘。
+        """
         for m in self._members:
             entries = history_mod.for_member(self._hist, m, self._addrs, self._members)
             seat = self.seats.get(m.name)
@@ -412,12 +422,16 @@ class OfficeWindow(QMainWindow):
         m = next((x for x in self._members if x.name == name), None)
         if m is None:
             return None
-        entries = history_mod.for_member(cc_signals.read_history(), m,
-                                         self._addrs, self._members)
+        # **只读一遍文件**:先刷新(顺带把 self._hist 换成最新的那份),再从这份
+        # 里组装 entries——分两次读同一个文件有可能拿到不一致的两份。
+        self.refresh_history(force=True)
+        entries = history_mod.for_member(self._hist, m, self._addrs, self._members)
         if entries:
+            # 顺序要紧:**先算出 entries(含未读数)、再推水位**,反过来的话
+            # 这一轮的未读数会被自己刚写的水位抹平。
             self._seen[name] = max(e.at for e in entries)
             self._save_seen()
-            self.refresh_history(force=True)        # 红点立刻灭,不等下一轮 tick
+            self._apply_history()       # 红点立刻灭,不等下一轮 tick(也不再读一遍盘)
         # 窗以办公室为父:WA_DeleteOnClose 只管关掉时销毁 C++ 那半边,**在此之前**
         # 得有人持有它——父子关系就是那个持有者,不然出了这个函数就没人引用了。
         pop = HistoryPopup(name, entries, self)

@@ -28,8 +28,13 @@ def _members():
 
 @pytest.fixture
 def win(app, tmp_path, monkeypatch):
-    from claude_cockpit import settings
+    from claude_cockpit import cc_signals, settings
     monkeypatch.setattr(settings, "_path", lambda: tmp_path / "settings.json")
+    # 对话记录也要隔离:OfficeWindow 一建就 refresh_history,不打桩的话
+    # 用例会去读开发机上真实的 history.jsonl(那里面真有 cwd 归一后
+    # 和测试员工撞上的记录),结果随机器而变。只读不写,指到 tmp 即可。
+    monkeypatch.setattr(cc_signals, "history_path",
+                        lambda: tmp_path / "history.jsonl")
     return OfficeWindow(_members())
 
 
@@ -478,3 +483,19 @@ def test_refresh_history_skips_when_file_unchanged(win, monkeypatch):
     win.refresh_history()
     win.refresh_history()
     assert len(calls) == 1
+
+
+def test_open_history_unknown_member(win):
+    """不在花名册里的名字:返回 None,不炸也不弹窗。"""
+    assert win.open_history("查无此人") is None
+
+
+def test_open_history_without_records_writes_no_watermark(win, monkeypatch):
+    """一条记录都没有时不该写水位——将来谁把 `if entries:` 优化掉,这条会红。"""
+    from claude_cockpit import cc_signals, settings
+    monkeypatch.setattr(cc_signals, "read_history", lambda: [])
+    monkeypatch.setattr(cc_signals, "history_stat", lambda: (1.0, 1))
+    pop = win.open_history("fad")
+    assert "fad" not in (settings.load().get("seen_messages") or {})
+    if pop is not None:
+        pop.close()

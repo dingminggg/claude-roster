@@ -25,8 +25,13 @@ def app():
 
 @pytest.fixture
 def win(app, tmp_path, monkeypatch):
-    from claude_cockpit import settings
+    from claude_cockpit import cc_signals, settings
     monkeypatch.setattr(settings, "_path", lambda: tmp_path / "settings.json")
+    # 对话记录也要隔离:OfficeWindow 一建就 refresh_history,不打桩的话
+    # 用例会去读开发机上真实的 history.jsonl(那里面真有 cwd 归一后
+    # 和测试员工撞上的记录),结果随机器而变。只读不写,指到 tmp 即可。
+    monkeypatch.setattr(cc_signals, "history_path",
+                        lambda: tmp_path / "history.jsonl")
     members = [Member(name="fad", cwd=Path("."), dept="服务端"),
                Member(name=OPS_NAME, cwd=Path("."), dept=OPS_DEPT)]
     return OfficeWindow(members, services.DEFAULTS)
