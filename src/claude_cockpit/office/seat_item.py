@@ -111,13 +111,13 @@ PLATE_LEN = (DESK_X - PLATE_X) * 2.2361
 _PLATE_FM: QFontMetricsF | None = None
 
 
-def _plate_text(name: str) -> str:
-    """按**字宽**把名字裁到屏风上那块名牌装得下——名牌只有 PLATE_LEN 那么长,
+def _plate_text(name: str, length: float = PLATE_LEN) -> str:
+    """按**字宽**把名字裁到屏风上那块名牌装得下——名牌只有 `length` 那么长,
     按字数裁不行:`etl` 和 `customer-web` 同样是 3/12 个字符,宽度差三倍。"""
     global _PLATE_FM
     if _PLATE_FM is None:                   # QFontMetricsF 得等 QApplication 起来才能建
         _PLATE_FM = QFontMetricsF(FONT_NAME)
-    return _PLATE_FM.elidedText(name, Qt.TextElideMode.ElideRight, PLATE_LEN)
+    return _PLATE_FM.elidedText(name, Qt.TextElideMode.ElideRight, length)
 
 
 class SeatItem(QGraphicsObject):
@@ -469,9 +469,14 @@ class SeatItem(QGraphicsObject):
         _on(p, ISO_TEXT_FX, PLATE_X, 1.4, 41)
         p.setFont(FONT_NAME)
         p.setPen(QPen(TXT if present else DIM))
-        p.drawText(QRectF(0, 0, PLATE_LEN, 12),                  # 右对齐:贴屏风右端,
-                   Qt.AlignmentFlag.AlignRight                   # 别顶着显示器那头
-                   | Qt.AlignmentFlag.AlignVCenter, _plate_text(self.name))
+        # 桌上立着机柜的那张工位(运维)**不画这块名牌**:柜子进深占满桌子,它的
+        # 左下轮廓会整个扫过屏风,名字缩到哪儿都被盖掉(试过把名牌右边界卡到柜子
+        # 的 x 上,柜子顶面的左角比那还靠左,照样盖)。名字改印在柜门上。
+        if not self.has_rack():
+            p.drawText(QRectF(0, 0, PLATE_LEN, 12),              # 右对齐:贴屏风右端,
+                       Qt.AlignmentFlag.AlignRight               # 别顶着显示器那头
+                       | Qt.AlignmentFlag.AlignVCenter,
+                       _plate_text(self.name))
         p.restore()
         p.setPen(Qt.PenStyle.NoPen)
 
@@ -606,7 +611,7 @@ class SeatItem(QGraphicsObject):
         # 画在文件堆之后、人之前——它比人离镜头远,画在人后面会被前面的东西盖住。
         if self._services:
             rack_item.draw(p, self._services, self._svc_states,
-                           blink=self._blink, dim=not present)
+                           blink=self._blink, dim=not present, label=self.name)
 
         # ============ 椅子和人 ============
         # 坐在桌子的左前方(y 大 = 离镜头近),面朝桌子,所以我们看到的是后脑勺和椅背。
