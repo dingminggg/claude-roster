@@ -24,13 +24,13 @@ agents:
   color: '#93aba6'
   permission_mode: default
   dept: 服务端
-- name: customer
+- name: app
   cwd: C:\Users\LQ\PhpstormProjects\foodsup-client
   emoji: 🙋
   color: '#609ceb'
   permission_mode: plan
   dept: 客户端
-- name: customer-web
+- name: app-web
   cwd: C:\Users\LQ\PhpstormProjects\foodsup-client-web
   emoji: 👨‍🍳
   color: '#3b82f6'

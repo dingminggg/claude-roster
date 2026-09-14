@@ -89,3 +89,18 @@ def mix(a: QColor, b: QColor, t: float) -> QColor:
         round(a.green() + (b.green() - a.green()) * t),
         round(a.blue() + (b.blue() - a.blue()) * t),
     )
+
+
+# ---------- 机房(本地服务的机柜) ----------
+# 机柜是**全场最深的物件**:它不是办公家具,和浅木桌摆在一起才一眼分得出「这是设备」。
+RACK = QColor("#3a4049")            # 柜体正面(装着服务名和那排 1U 槽位)
+RACK_SIDE = QColor("#2c313a")       # 右前那个侧面:深一档,盒子才立得起来
+RACK_TOP = QColor("#4a515c")        # 顶面
+RACK_SLOT = QColor("#2a2f37")       # 一个 1U 槽位
+RACK_NAME = QColor("#e8ecf2")       # 印在柜面上的服务名(深柜体上只能用浅字)
+RACK_OFF = QColor("#9aa1ac")        # 没跑:整柜褪成灰,和空工位一个口径
+
+# 状态灯。绿/琥珀和工位屏幕同一套语义,不另起一套颜色。
+LED_UP = QColor("#22c55e")          # 端口听得到
+LED_STUCK = QColor("#f0a92e")       # 端口在但不搭理(防火墙吞了 / 进程僵住)
+LED_DOWN = QColor("#4b525c")        # 灭灯:比柜体浅一点点,看得出「有这个灯,只是没亮」

@@ -20,13 +20,26 @@ ISO_OX, ISO_OY = 62.0, 52.0         # 桌子后角在**地面**上的落点(原�
 DESK_X, DESK_Y = 61.0, 22.0
 
 
+def pt_at(ox: float, oy: float, x: float, y: float, z: float = 0.0) -> QPointF:
+    """房间坐标 → 图元局部坐标,**投影原点由调用方给**。
+
+    工位用不到这个(它的原点固定是 ISO_OX/OY),但机柜是另一套家具、摆在自己的
+    图元框里,原点不一样;两边共用同一个投影公式才不会悄悄画成两个朝向。
+    """
+    return QPointF(ox + (x - y) * 2.0, oy + (x + y) - z)
+
+
 def pt(x: float, y: float, z: float = 0.0) -> QPointF:
     """房间坐标 → 工位局部坐标。"""
-    return QPointF(ISO_OX + (x - y) * 2.0, ISO_OY + (x + y) - z)
+    return pt_at(ISO_OX, ISO_OY, x, y, z)
 
 
 def quad(*pts) -> QPolygonF:
     return QPolygonF([pt(*t) for t in pts])
+
+
+def quad_at(ox: float, oy: float, *pts) -> QPolygonF:
+    return QPolygonF([pt_at(ox, oy, *t) for t in pts])
 
 
 # 三个平面各自的画笔坐标系。套上之后就能用普通的 drawRoundedRect / drawEllipse
@@ -43,5 +56,13 @@ ISO_TEXT_FX = QTransform(0.8944, 0.4472, 0, 1, 0, 0)
 def on(p: QPainter, plane: QTransform, x: float, y: float, z: float = 0.0) -> None:
     """把画笔挪到房间点 (x,y,z) 并切进 plane 平面。调用方负责 save()/restore()。"""
     q = pt(x, y, z)
+    p.translate(q.x(), q.y())
+    p.setTransform(QTransform(plane), True)
+
+
+def on_at(p: QPainter, plane: QTransform, ox: float, oy: float,
+          x: float, y: float, z: float = 0.0) -> None:
+    """同 `on`,但投影原点由调用方给(机柜用)。"""
+    q = pt_at(ox, oy, x, y, z)
     p.translate(q.x(), q.y())
     p.setTransform(QTransform(plane), True)

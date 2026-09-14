@@ -20,7 +20,11 @@ AREA_DEFAULT = (452.0, 200.0)   # 一块地毯至少这么大(一排两个工位
 AREA_COLS = 3                   # 新地毯按几列铺:再宽一屏就装不下了
 AREA_ORIGIN = (10.0, 30.0)      # 第一块地毯的落点
 DEFAULT_WINDOW = (900, 620)
-UNASSIGNED = "未分配"           # 没填 dept 的成员归到这块地毯
+UNASSIGNED = "未分配"           # 没填 dept 的员工归到这块部门区
+SERVER_ROOM = "机房"           # 本地服务(机柜)那块区;和部门区同一套布局
+# 机柜在 seats 里的键前缀。员工名只允许 [\w-],所以带冒号的键**一定**不会和
+# 员工撞;机柜因此能白拿工位那套吸附/存盘,不用另起一份布局账本。
+SVC_PREFIX = "svc:"
 
 
 @dataclass

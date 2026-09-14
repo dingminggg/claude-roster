@@ -5,14 +5,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QCursor, QGuiApplication, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QMenu, QMessageBox, QSystemTrayIcon,
 )
 
-from . import cc_signals, dialogs, peers, sessions, settings, sound, store, winman
+from . import (
+    cc_signals, dialogs, peers, services, sessions, settings, sound, store,
+    winman,
+)
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
 from .matching import match_pending, norm_path, sessions_for_cwd
@@ -46,9 +49,41 @@ def tray_popup_decision(has_pending: bool, over_icon: bool, over_popup: bool,
 
 def _config_path() -> Path:
     # v1:用项目根 / 当前目录的 agents.yaml;后续可加 --config
+    return _root_file("agents.yaml")
+
+
+def _services_path() -> Path:
+    """机房那份服务清单。不存在也没关系——services.load 会退回内置的三个。"""
+    return _root_file("services.yaml")
+
+
+def _root_file(name: str) -> Path:
     root = Path(__file__).resolve().parent.parent.parent
-    p = root / "agents.yaml"
-    return p if p.exists() else Path("agents.yaml")
+    p = root / name
+    return p if p.exists() else Path(name)
+
+
+class _ProbeSignals(QObject):
+    done = Signal(dict)
+
+
+class _ProbeJob(QRunnable):
+    """后台探一轮服务端口。
+
+    **必须离开主线程**:本机 connect 基本瞬时返回,但被防火墙吞掉时会挂到超时,
+    几个服务串起来就是界面卡住一秒多。结果经信号回主线程再刷界面。
+    """
+
+    def __init__(self, svcs):
+        super().__init__()
+        self.svcs = svcs
+        self.signals = _ProbeSignals()
+
+    def run(self) -> None:
+        try:
+            self.signals.done.emit(services.probe_all(self.svcs))
+        except Exception:
+            self.signals.done.emit({})   # 炸了也要回一声,否则那道闸永远关着
 
 
 _SINGLE_KEY = "claude-cockpit-single-instance"
@@ -127,7 +162,8 @@ def main() -> int:
 
     cfg_path = _config_path()
     members = load_config(cfg_path)
-    panel = OfficeWindow(members)       # 变量名保留 panel:下面几十处引用不动
+    svcs = services.load(_services_path())
+    panel = OfficeWindow(members, svcs)  # 变量名保留 panel:下面几十处引用不动
     by_name = {m.name: m for m in members}
     # name -> 控制台窗口句柄。落盘缓存:退出/重启 cockpit 后载回,凡是句柄仍指向
     # 一个存活的控制台窗口就复用(置前 / 屏蔽 ▶),不必重开;失效的丢弃。
@@ -394,6 +430,8 @@ def main() -> int:
     panel.delete_requested.connect(on_delete)
     panel.open_dir_requested.connect(on_open_dir)
     panel.copy_address_requested.connect(on_copy_address)
+    panel.copy_text_requested.connect(
+        lambda t: QGuiApplication.clipboard().setText(t))
     panel.delete_session_requested.connect(on_delete_session)
 
     def on_dept_changed(name: str, dept: str) -> None:
@@ -594,6 +632,26 @@ def main() -> int:
     blink_timer = QTimer()
     blink_timer.timeout.connect(_blink_tick)
     blink_timer.start(550)
+
+    # 机房:5s 探一轮本地服务。**不跟着 1s 那条主 tick 走**——服务起停不是秒级的事,
+    # 每秒探一遍纯属白烧。探测本身在线程池里跑,结果回主线程刷机柜。
+    probing = {"on": False}
+
+    def _probe_services() -> None:
+        # 上一轮还没回来就跳过这一轮:一个停掉的服务最坏要等 2.5s(Windows 的 SYN
+        # 重试),不设这道闸,慢的时候会一轮压一轮堆在线程池里。
+        if not svcs or probing["on"]:
+            return
+        probing["on"] = True
+        job = _ProbeJob(svcs)
+        job.signals.done.connect(panel.set_service_states)
+        job.signals.done.connect(lambda _: probing.__setitem__("on", False))
+        QThreadPool.globalInstance().start(job)
+
+    svc_timer = QTimer()
+    svc_timer.timeout.connect(_probe_services)
+    svc_timer.start(5000)
+    _probe_services()                   # 开窗就探一次,别等头 5 秒
 
     # 托盘悬停浮层:有消息时把光标移到托盘图标上方 → 弹出「谁有消息」可点列表,
     # 点一行 = 等价点成员卡(on_row_click:最大化该控制台/其余最小化/标记已读)。
