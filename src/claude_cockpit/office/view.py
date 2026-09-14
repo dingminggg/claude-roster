@@ -21,6 +21,8 @@ from .. import layout as layout_mod
 from ..config import OPS_NAME
 from ..layout import GAP
 from .. import settings
+# 直接 import 函数:set_sessions 的形参就叫 sessions,import 模块会被它遮住
+from ..sessions import issue_tag
 from .dept_area import DeptAreaItem
 from .seat_item import SeatItem
 from .walker_item import WalkerItem
@@ -178,6 +180,9 @@ class OfficeWindow(QMainWindow):
         ops = self.seats.get(OPS_NAME)      # 机柜摆在运维桌上
         if ops is not None:
             ops.set_services(self._services)
+            # 运维没有文件堆:那叠纸的意思是「几条历史会话、右键挑一条接着聊」,
+            # 他不走这条路;腾出来的地方正好给机柜。
+            ops.set_papers_enabled(False)
         self.refit_scene()
         # 窗口尺寸和镜头都只在第一次装配时设:rebuild 每次增删改成员都会跑,
         # 每次都设的话,改一个成员的 emoji 就把窗口缩回存盘尺寸、视角弹回左上角
@@ -366,6 +371,8 @@ class OfficeWindow(QMainWindow):
         if seat is not None:
             seat.set_session_count(len(items))
             seat.set_subtitle(_session_label(items[0]) if items else "新会话")
+            # 最上面那张纸上印最近这条会话的 issue 号(抠不出来就留白)
+            seat.set_session_tag(issue_tag(items[0].title) if items else "")
 
     def set_address(self, name: str, addr: str | None) -> None:
         self._addrs[name] = addr

@@ -24,7 +24,9 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from ..layout import SEAT_H, SEAT_W
 from . import bubble, person, rack_item
-from .iso import DESK_X, DESK_Y, ISO_FX, ISO_FY, ISO_TEXT_FX, ISO_TOP
+from .iso import (
+    DESK_X, DESK_Y, ISO_FX, ISO_FY, ISO_TEXT_FX, ISO_TEXT_TOP, ISO_TOP,
+)
 from .iso import on as _on
 from .iso import pt as _pt
 from .iso import quad as _quad
@@ -48,6 +50,7 @@ def _font(size: int, bold: bool = False) -> QFont:
 # 而 paint 是「每个工位 × 每次 tick/闪烁/悬停」都跑的。
 FONT_NAME = _font(8, bold=True)     # 挡板上那块名牌
 FONT_SUB = _font(8)                 # 会话行 / 控制台标题
+FONT_PAPER = _font(6, bold=True)    # 纸上那个 issue 号
 
 
 # 屏幕上那几行「字」:忙的时候往上滚,像终端在刷输出。
@@ -55,6 +58,19 @@ FONT_SUB = _font(8)                 # 会话行 / 控制台标题
 SCREEN_LINES = (15, 9, 16, 12, 19, 8, 14, 10)
 LINE_GAP = 4.0                      # 行距(房间单位)
 SCROLL_STEP = 0.55                  # 每帧往上挪多少
+
+# 桌上那叠文件:一张纸 = 一条历史会话,最上面那张印着 issue 号。
+# **尺寸是被「放得下 6 位数字」倒推出来的**:纸上那行字走 ISO_TEXT_TOP,
+# 沿纸的 x 方向 1 个房间单位 = 2.2361px(横 2、竖 1),6 位数字(6pt)在真机上
+# 要 30px,加两边留白 → 纸至少 16 个单位长,取 17。
+# **别拿 QFontMetrics 去卡这条**:离屏平台的回退字体比真机宽一大截(同一串数字
+# 48px vs 30px),按它算会把纸撑到桌子那么大——用例卡的是几何预算 PAPER_LEN。它同时也是右键「接着这条继续 / 删除这条记录」的唯一
+# 入口,画小了点不着。
+PAPER_X, PAPER_Y = 38.0, 4.0            # 最下面那张纸的落点(显示器右边)
+PAPER_W, PAPER_H = 17.0, 15.0           # 一张纸多大(房间单位)
+PAPER_LEN = PAPER_W * 2.2361            # 纸上那行字的可用长度(px)
+# 一叠里每张错开多少。纸放大之后 0.6 个单位看不出是「一叠」,得跟着纸一起放大。
+PAPER_STEP = 1.4
 
 # 「起来了」的状态:明暗、手型、屏幕闪统一按它判断,别散着写 == "running"
 UP_STATES = ("running", "busy", "idle")
@@ -126,6 +142,8 @@ class SeatItem(QGraphicsObject):
         self._title = ""
         self._sub = "新会话"
         self._papers = 0                # 桌上那叠文件的张数 = 历史会话条数
+        self._papers_on = True          # 这个工位有没有文件堆(运维那张没有)
+        self._tag = ""                  # 最上面那张纸上印的 issue 号(认不出就留白)
         self._wave = 0                  # 音浪动画的相位(朗读时才转)
         self._scroll = 0.0              # 屏幕滚动的偏移(忙的时候才转)
         k = sum(ord(c) for c in self.name) % len(SCREEN_LINES)
@@ -167,6 +185,9 @@ class SeatItem(QGraphicsObject):
 
     def has_rack(self) -> bool:
         return bool(self._services)
+
+    def has_papers(self) -> bool:
+        return self._papers_on and bool(self._papers)
 
     def service_report(self) -> str:
         return rack_item.report(self._services, self._svc_states)
@@ -242,6 +263,24 @@ class SeatItem(QGraphicsObject):
             self._papers = n
             self.update()
 
+    def set_papers_enabled(self, on: bool) -> None:
+        """这个工位显不显示文件堆。
+
+        **运维那张关掉**:那叠纸的意思是「这个员工有几条历史会话、右键挑一条接着
+        聊」,运维不走这条路——他桌上的活儿是那台机柜。关掉之后「显示器右边」那块
+        地也就腾给机柜了,两样不会挤在一起。
+        """
+        if self._papers_on != bool(on):
+            self._papers_on = bool(on)
+            self.update()
+
+    def set_session_tag(self, tag: str) -> None:
+        """最上面那张纸上印的 issue 号(由 `sessions.issue_tag` 从会话标题里抠)。"""
+        tag = str(tag or "")[:6]
+        if tag != self._tag:
+            self._tag = tag
+            self.update()
+
     def set_subtitle(self, text: str) -> None:
         """没上班时那条「上次会话 / 新会话」——只出现在文件堆的悬停提示里。"""
         self._sub = text or "新会话"
@@ -294,8 +333,21 @@ class SeatItem(QGraphicsObject):
         return QRectF(23, 50, 40, 66)
 
     def r_files(self) -> QRectF:
-        """桌上那叠文件:一张纸 = 一条历史会话,右键它挑会话。"""
-        return QRectF(116, 85, 48, 26)
+        """桌上那叠文件:一张纸 = 一条历史会话,右键它挑会话。
+
+        数值 = 那叠纸在 `_pt` 投影下的包围盒(四个角取 min/max),纸一改尺寸这里
+        自动跟着变——paint 和 hit 各写一份必然漂移(工位那几块命中区同一条规矩)。
+        """
+        xs, ys = [], []
+        for x, y in ((PAPER_X, PAPER_Y), (PAPER_X + PAPER_W, PAPER_Y),
+                     (PAPER_X, PAPER_Y + PAPER_H),
+                     (PAPER_X + PAPER_W, PAPER_Y + PAPER_H)):
+            for z in (26.3, 28.5):
+                q = _pt(x, y, z)
+                xs.append(q.x())
+                ys.append(q.y())
+        return QRectF(min(xs) - 2, min(ys) - 2,
+                      max(xs) - min(xs) + 4, max(ys) - min(ys) + 4)
 
     def r_rack(self) -> QRectF:
         """桌上那台小机柜(只有运维那张工位有):右键它复制服务地址。"""
@@ -313,7 +365,7 @@ class SeatItem(QGraphicsObject):
             return "person"
         if self._services and self.r_rack().contains(pos):
             return "rack"
-        if self._papers and self.r_files().contains(pos):
+        if self.has_papers() and self.r_files().contains(pos):
             return "files"
         return "seat"
 
@@ -514,24 +566,40 @@ class SeatItem(QGraphicsObject):
         p.drawEllipse(QRectF(top.x() - 4.5, top.y() + 3.5, 9, 4.5))
         p.drawEllipse(QRectF(top.x() - 4.5, top.y() - 2.2, 9, 4.5))
 
-        # 桌上一叠文件:一张纸 = 一条历史会话。摆在桌子的**近右角**——
-        # 「显示器右边」那块地让给了机柜(运维那张工位上),两样挤在一起命中区会打架。
-        # **别画小**:这块是右键「接着这条继续 / 删除这条记录」的唯一入口,
-        # 小了不好点(命中区 r_files 也跟着这里的尺寸走)。
-        if self._papers:
+        # 桌上一叠文件:一张纸 = 一条历史会话,最上面那张印着 issue 号。
+        # 摆在**显示器右侧**(x 大)。**别画小**:这块是右键「接着这条继续 /
+        # 删除这条记录」的唯一入口,小了点不着(命中区 r_files 直接按这里的
+        # 尺寸算出来)。运维那张工位没有这叠纸(见 set_papers_enabled),
+        # 那块地让给了桌上的机柜。
+        if self.has_papers():
             n = min(3, self._papers)
             for i in range(n):
                 p.save()
-                _on(p, ISO_TOP, 50.0 - i * 0.6, 10.0 - i * 0.6, 26.3 + i * 0.9)
+                _on(p, ISO_TOP, PAPER_X - i * PAPER_STEP,
+                    PAPER_Y - i * PAPER_STEP, 26.3 + i * 0.9)
                 p.setPen(QPen(PAPER_EDGE, 0.6))     # 白纸压木桌,勾条暖灰边才有厚度
                 p.setBrush(QBrush(PAPER))
-                p.drawRoundedRect(QRectF(0, 0, 10, 12), 0.9, 0.9)   # 竖放:y 向更长
-                if i == n - 1:                      # 最上面那张画两条「字」
-                    p.setPen(Qt.PenStyle.NoPen)
-                    p.setBrush(QBrush(PAPER_LINE))
-                    p.drawRect(QRectF(2, 3, 6, 0.9))
-                    p.drawRect(QRectF(2, 5.4, 3.8, 0.9))
+                p.drawRoundedRect(QRectF(0, 0, PAPER_W, PAPER_H), 0.9, 0.9)
                 p.restore()
+            p.save()                        # 最上面那张:印 issue 号,没有就两条「字」
+            top_x = PAPER_X - (n - 1) * PAPER_STEP
+            top_y = PAPER_Y - (n - 1) * PAPER_STEP
+            top_z = 26.3 + (n - 1) * 0.9
+            if self._tag:
+                # 走 ISO_TEXT_TOP:直接用 ISO_TOP 会把字横竖都拉成 2.236 倍
+                _on(p, ISO_TEXT_TOP, top_x + 1.6, top_y + 3.0, top_z)
+                p.setPen(QPen(TXT if present else DIM))
+                p.setFont(FONT_PAPER)
+                p.drawText(QRectF(0, 0, PAPER_LEN - 6, 9),
+                           int(Qt.AlignmentFlag.AlignLeft
+                               | Qt.AlignmentFlag.AlignVCenter), self._tag)
+            else:
+                _on(p, ISO_TOP, top_x, top_y, top_z)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(PAPER_LINE))
+                p.drawRect(QRectF(2.5, 4, PAPER_W - 6, 1.0))
+                p.drawRect(QRectF(2.5, 7, PAPER_W - 9, 1.0))
+            p.restore()
             p.setPen(Qt.PenStyle.NoPen)
 
         # 桌上那台小机柜(只有运维那张工位有):摆在**显示器右边**。
@@ -603,13 +671,6 @@ class SeatItem(QGraphicsObject):
 
     def hoverLeaveEvent(self, e):
         self._hover = False
-        # 桌上那台小机柜:只有运维那张工位有(`view` 给它喂服务清单)。
-        self._services: list = []
-        self._svc_states: dict[str, str] = {}
-        self._say: list[str] = []           # 正在说的那句话(折好行的)
-        self._say_timer = QTimer(self)      # 自带表:说完自己收回去
-        self._say_timer.setSingleShot(True)
-        self._say_timer.timeout.connect(lambda: self.say(""))
         self.update()
 
     def mousePressEvent(self, e):

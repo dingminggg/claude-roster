@@ -91,12 +91,17 @@ def test_only_the_ops_seat_has_a_rack(win):
     assert not win.seats["fad"].has_rack()
 
 
-def test_rack_hit_area_does_not_overlap_the_others(win):
-    """几块命中区互不重叠,不然会「点机柜弹出会话菜单」这种串台。"""
-    seat = win.seats[OPS_NAME]
-    r = seat.r_rack()
-    for other in (seat.r_files(), seat.r_person(), seat.r_speaker()):
-        assert not r.intersects(other)
+def test_rack_and_papers_never_coexist(win):
+    """机柜和文件堆**都想占「显示器右边」**,所以它们互斥:有机柜的那张工位
+    (运维)没有文件堆,有文件堆的工位没有机柜。命中区因此不会串台。"""
+    ops, other = win.seats[OPS_NAME], win.seats["fad"]
+    ops.set_session_count(3)
+    assert ops.has_rack() and not ops.has_papers()
+    other.set_session_count(3)
+    assert other.has_papers() and not other.has_rack()
+    # 剩下那几块和机柜是真的不重叠
+    for r in (ops.r_person(), ops.r_speaker()):
+        assert not ops.r_rack().intersects(r)
 
 
 def test_clicking_the_rack_is_its_own_hit(win):
@@ -190,3 +195,31 @@ def test_the_rack_no_longer_takes_a_grid_slot(win):
     seats = settings.load()["office"]["seats"]
     assert not any(k.startswith(layout_mod.SVC_PREFIX) for k in seats)
     assert OPS_NAME in seats and "fad" in seats
+
+
+def test_paper_fits_six_digits(app):
+    """纸的尺寸是被「放得下 6 位数字」倒推出来的,别改小了写不下。
+
+    卡的是**几何预算**不是 QFontMetrics:离屏平台的回退字体比真机宽一大截
+    (同一串数字 48px vs 30px),按它算会把纸撑到桌子那么大。
+    """
+    from claude_cockpit.office import seat_item as si
+    assert si.PAPER_LEN - 6 >= 30
+
+
+def test_issue_tag_from_titles():
+    from claude_cockpit.sessions import issue_tag
+    assert issue_tag("#1085 修复下单") == "1085"
+    assert issue_tag("feature/1085-fix") == "1085"
+    assert issue_tag("issue 1085 收尾") == "1085"
+    # 标题里到处是数字,认错了还不如留白
+    assert issue_tag("2026-09-14 改好了") == ""
+    assert issue_tag("v1.2.3 发版") == ""
+    assert issue_tag("跑一下 ETL") == ""
+    assert issue_tag("") == ""
+
+
+def test_tag_reaches_the_top_sheet(win):
+    from claude_cockpit.sessions import Session
+    win.set_sessions("fad", [Session(id="a", title="#1085 修复下单", mtime=1)])
+    assert win.seats["fad"]._tag == "1085"

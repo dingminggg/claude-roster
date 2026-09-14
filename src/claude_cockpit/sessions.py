@@ -120,3 +120,19 @@ def delete_session(cwd, session_id: str, projects_root=None,
 
 def fmt_mtime(mtime: float) -> str:
     return datetime.fromtimestamp(mtime).strftime("%m-%d")
+
+
+# 桌上那张纸上印的编号。**先认 `#1085` 这种显式写法**,再退回「独立的一串 3~6 位
+# 数字」——标题里到处是数字(日期、版本号、端口),不先认 # 的话「2026-09-14 修好了」
+# 会被读成 issue 2026。认不出就不印,纸上留白比印个错号强。
+_ISSUE_HASH = re.compile(r"#(\d{1,6})")
+# 「独立的一串 3~6 位数字」,但**躲开日期**:2026-09-14 里的 2026 不是 issue 号
+# (后面跟 -数字 的一律不算)。
+_ISSUE_BARE = re.compile(r"(?<![\d.])(?<!\d-)(\d{3,6})(?![\d.])(?!-\d)")
+
+
+def issue_tag(title: str) -> str:
+    """会话标题 → issue 号(纯数字,认不出给空串)。纯逻辑,可单测。"""
+    text = str(title or "")
+    m = _ISSUE_HASH.search(text) or _ISSUE_BARE.search(text)
+    return m.group(1) if m else ""
