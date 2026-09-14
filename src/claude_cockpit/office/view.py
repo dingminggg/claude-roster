@@ -21,7 +21,7 @@ from .. import layout as layout_mod
 from ..layout import GAP, SERVER_ROOM, SVC_PREFIX
 from .. import settings
 from .dept_area import DeptAreaItem
-from .rack_item import OpsItem, RackItem
+from .rack_item import OpsDeskItem, OpsItem, RackItem
 from .seat_item import SeatItem
 from .walker_item import WalkerItem
 from . import theme
@@ -29,6 +29,10 @@ from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 
 # 每个工位自己的大小档位。**整体缩放已经退休**:那是把所有人一起缩,等于没解决
 # 「成员多了看不过来」——真正要的是把不常用的单独缩小。
+# 机房里那两个格子。一台柜子装下所有服务,所以机房只有「柜子」和「运维工位」
+# 两样占位;它们和员工工位共用 layout 那套槽位/吸附/存盘(键带 svc: 前缀)。
+ROOM_SLOTS = ("rack", "opsdesk")
+
 SEAT_SCALES = (("标准", 1.0), ("小", 0.7), ("更小", 0.5))
 SAVE_DEBOUNCE_MS = 400
 SCREEN_MS = 120                 # 屏幕上那几行往上滚的帧间隔
@@ -118,7 +122,8 @@ class OfficeWindow(QMainWindow):
         self.setWindowTitle("办公室")
         self.scene = QGraphicsScene(self)
         self.seats: dict[str, SeatItem] = {}
-        self.racks: dict[str, RackItem] = {}
+        self.rack: RackItem | None = None
+        self.ops_desk: OpsDeskItem | None = None
         self.ops: OpsItem | None = None
         self._services = list(services)
         self.areas: dict[str, DeptAreaItem] = {}
@@ -150,7 +155,8 @@ class OfficeWindow(QMainWindow):
         # 回调,那个回调会回头找发送方工位——这时 seats 里还挂着已经被删掉的 C++ 对象,
         # 一碰就 RuntimeError(踩过)。
         self.seats.clear()
-        self.racks.clear()
+        self.rack = None
+        self.ops_desk = None
         self.ops = None
         self.areas.clear()
         self._walkers.clear()
@@ -168,8 +174,10 @@ class OfficeWindow(QMainWindow):
         parsed.depts = sorted(self._extra_depts | set(parsed.depts))
         # 机柜按「住在机房的占位成员」参与布局:地毯、槽位、吸附、存盘全走同一套,
         # 机房不需要自己的布局账本(键带 svc: 前缀,和员工名撞不上)。
-        occupants = self._members + [_RackStub(SVC_PREFIX + s.name, SERVER_ROOM)
-                                     for s in self._services]
+        occupants = list(self._members)
+        if self._services:      # 一台柜子 + 一张运维工位,不再是一个服务一格
+            occupants += [_RackStub(SVC_PREFIX + k, SERVER_ROOM)
+                          for k in ROOM_SLOTS]
         lay = layout_mod.ensure(parsed, occupants)
         self._lay = lay
         for dept, (x, y, w, h) in lay.areas.items():
@@ -189,19 +197,18 @@ class OfficeWindow(QMainWindow):
             seat.speaker_clicked.connect(self.stop_speaking_requested.emit)
             seat.moved.connect(self._on_seat_dropped)
             self.seats[m.name] = seat
-        for svc in self._services:
-            rack = RackItem(svc)
-            area = self.areas[SERVER_ROOM]
-            rack.setParentItem(area)
-            rx, ry = lay.seats[SVC_PREFIX + svc.name]
-            rack.setPos(rx, ry)
-            rack.moved.connect(self._on_rack_dropped)
-            self.racks[svc.name] = rack
         if self._services:
             area = self.areas[SERVER_ROOM]
-            self.ops = OpsItem()
+            self.rack = RackItem(self._services)
+            self.ops_desk = OpsDeskItem()
+            for key, item in zip(ROOM_SLOTS, (self.rack, self.ops_desk)):
+                item.setParentItem(area)
+                item.setPos(*lay.seats[SVC_PREFIX + key])
+                item.moved.connect(self._on_room_item_dropped)
+            self.ops = OpsItem()    # 人画在柜子和桌子之上(他会走到它们跟前)
             self.ops.setParentItem(area)
-            self.ops.place(area.w, area.h)
+            self.ops.setZValue(1)
+            self._place_ops()
         self.refit_scene()
         # 窗口尺寸和镜头都只在第一次装配时设:rebuild 每次增删改成员都会跑,
         # 每次都设的话,改一个成员的 emoji 就把窗口缩回存盘尺寸、视角弹回左上角
@@ -232,13 +239,32 @@ class OfficeWindow(QMainWindow):
             self._snap(seat)
         self._queue_save()
 
-    def _on_rack_dropped(self, name: str) -> None:
-        """机柜拖完:只咬槽位 + 存盘。**不跟着换部门**——工位拖到哪块地毯就归哪个
-        部门,机柜没有这回事:它永远是机房的设备,拖出去也不该把 mysql 划进后勤组。"""
-        rack = self.racks.get(name)
-        if rack is not None:
-            self._snap(rack)
+    def _on_room_item_dropped(self, name: str) -> None:
+        """机柜 / 运维工位拖完:只咬槽位 + 存盘,**不跟着换部门**——员工工位拖到哪块
+        部门区就归哪个部门,机房这两样没有这回事(拖出去也不该把 mysql 划进后勤组)。
+        人要跟着挪:他的落脚点是从这两样的位置算出来的。"""
+        item = self.rack if name == "rack" else self.ops_desk
+        if item is not None:
+            self._snap(item)
+        self._place_ops()
         self._queue_save()
+
+    def _place_ops(self) -> None:
+        """把运维的两个落脚点(工位的椅子、柜子正前方)喂给他。
+
+        **位置由这里算、不由图元自己去找**:图元之间不该互相认识(机柜不必知道
+        运维工位在哪)。过道取两样家具落脚点再往下一点——从那儿横着走不穿家具。
+        """
+        if self.ops is None or self.rack is None or self.ops_desk is None:
+            return
+        desk = self.ops_desk.pos() + self.ops_desk.seat_point()
+        rack = self.rack.pos() + self.rack.front_point()
+        # 过道压在两样家具落脚点的下面(从那儿横着走不穿家具),但**不能出机房**:
+        # 柜子的落脚点已经很靠格子下沿,再加一截就走到地毯外面去了(踩过)。
+        area = self.ops.parentItem()
+        floor = area.h - 8.0 if area is not None else rack.y() + 14.0
+        lane = min(max(desk.y(), rack.y()) + 14.0, floor)
+        self.ops.set_points(desk, rack, lane)
 
     def _on_area_changed(self, name: str) -> None:
         """地毯拖完/拉伸完:位置咬到地砖网格,边缘就不会歪在砖缝中间。"""
@@ -248,7 +274,7 @@ class OfficeWindow(QMainWindow):
             area.setPos(round(area.pos().x() / g) * g,
                         round(area.pos().y() / g) * g)
             if self.ops is not None and self.ops.parentItem() is area:
-                self.ops.place(area.w, area.h)   # 区域一拉伸就得重钉右下角
+                self._place_ops()       # 区域挪了,人的落脚点跟着重算
         self._queue_save()
 
     def _snap(self, seat) -> None:
@@ -256,7 +282,8 @@ class OfficeWindow(QMainWindow):
         area = seat.parentItem()
         if not isinstance(area, DeptAreaItem):
             return
-        siblings = list(self.seats.values()) + list(self.racks.values())
+        siblings = [i for i in (list(self.seats.values())
+                                + [self.rack, self.ops_desk]) if i is not None]
         taken = [(s.pos().x(), s.pos().y()) for s in siblings
                  if s is not seat and s.parentItem() is area]
         x, y = layout_mod.snap_to_slot((seat.pos().x(), seat.pos().y()),
@@ -329,13 +356,13 @@ class OfficeWindow(QMainWindow):
 
     # ---------- 机房 ----------
     def set_service_states(self, states: dict) -> None:
-        """喂一整份服务状态(由 main 的后台探测回来)。顺带决定运维小人坐还是站:
-        **有一个不绿就站起来**——站姿是余光信号,看出是哪台挂了还得靠柜灯。"""
-        for name, rack in self.racks.items():
-            if name in states:
-                rack.set_state(states[name])
+        """喂一整份服务状态(由 main 的后台探测回来)。顺带告诉运维出没出事:
+        **有一层不绿他就一直站在柜子前**——那是余光信号,看出是哪一层挂了还得靠柜灯。"""
+        if self.rack is None:
+            return
+        self.rack.set_states(states)
         if self.ops is not None:
-            self.ops.set_alarm(any(r.state() != "up" for r in self.racks.values()))
+            self.ops.set_alarm(not self.rack.all_green())
 
     def set_run_state(self, name: str, state: str) -> None:
         seat = self.seats.get(name)
@@ -417,8 +444,8 @@ class OfficeWindow(QMainWindow):
         self._blink_on = not self._blink_on
         for seat in self.seats.values():
             seat.set_blink(self._blink_on)
-        for rack in self.racks.values():
-            rack.set_blink(self._blink_on)
+        if self.rack is not None:
+            self.rack.set_blink(self._blink_on)
 
     # ---------- 送信的小人 ----------
     MAX_WALKERS = 4          # 同时最多几个在跑:再多就是一屋子人乱窜,反而看不出谁找谁
@@ -503,15 +530,22 @@ class OfficeWindow(QMainWindow):
             return self._menu_files(name)
         return self._menu_member(name)
 
-    def build_rack_menu(self, name: str) -> QMenu:
+    def build_rack_menu(self) -> QMenu:
         """机柜的右键菜单。**只读**——没有启停:启停服务要管理员权限,而且在一块
-        状态看板上误点一下就把 MySQL 关了,代价太大。"""
+        状态看板上误点一下就把 MySQL 关了,代价太大。
+
+        一台柜子装着好几个服务,所以「复制连接地址」是个子菜单(一层一条)。
+        子菜单必须用 `QMenu(标题, 父菜单)` 显式建:直接 `addMenu("标题")` 返回的
+        QMenu 在 Python 侧没人持有,会被回收掉、点开就报对象已删除(踩过)。
+        """
         menu = QMenu(self)
-        rack = self.racks.get(name)
-        addr = rack.svc.address if rack is not None else ""
-        act = menu.addAction("复制连接地址")
-        act.triggered.connect(lambda: self.copy_text_requested.emit(addr))
-        act.setEnabled(bool(addr))
+        svcs = self.rack.services if self.rack is not None else []
+        sub = QMenu("复制连接地址", menu)
+        for svc in svcs:
+            sub.addAction(f"{svc.name}  {svc.address}").triggered.connect(
+                lambda _=False, a=svc.address: self.copy_text_requested.emit(a))
+        sub.setEnabled(bool(svcs))
+        menu.addMenu(sub)
         return menu
 
     def _menu_person(self, name: str) -> QMenu:
@@ -633,7 +667,7 @@ class OfficeWindow(QMainWindow):
         while item is not None and not isinstance(item, (SeatItem, RackItem)):
             item = item.parentItem()
         if isinstance(item, RackItem):
-            self.build_rack_menu(item.name).exec(e.globalPos())
+            self.build_rack_menu().exec(e.globalPos())
             return
         if isinstance(item, SeatItem):
             where = item.hit(item.mapFromScene(self._canvas.mapToScene(in_canvas)))
@@ -652,8 +686,9 @@ class OfficeWindow(QMainWindow):
         lay = layout_mod.Layout(
             areas={n: a.geometry() for n, a in self.areas.items()},
             seats={**{n: (s.pos().x(), s.pos().y()) for n, s in self.seats.items()},
-                   **{SVC_PREFIX + n: (r.pos().x(), r.pos().y())
-                      for n, r in self.racks.items()}},
+                   **{SVC_PREFIX + k: (i.pos().x(), i.pos().y())
+                      for k, i in zip(ROOM_SLOTS, (self.rack, self.ops_desk))
+                      if i is not None}},
             scales={n: s.scale() for n, s in self.seats.items() if s.scale() != 1.0},
             depts=sorted(self.areas),
             window=(self.width(), self.height()),
