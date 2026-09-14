@@ -10,8 +10,6 @@ user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
 SW_RESTORE = 9
-SW_MINIMIZE = 6
-SW_MAXIMIZE = 3
 
 _EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -134,26 +132,13 @@ def _force_foreground(hwnd: int) -> None:
 
 
 def bring_to_front(hwnd: int) -> None:
-    """还原 + 置前。失败退化为闪任务栏。"""
+    """置前。**只有最小化的窗口才 SW_RESTORE**:无条件 restore 会把本来最大化的
+    控制台还原成小窗——「弹到眼前」不该顺手改人家的窗口大小(点一下就被缩了)。
+    失败全吞。"""
     try:
-        user32.ShowWindow(hwnd, SW_RESTORE)
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
         _force_foreground(hwnd)
-    except Exception:
-        pass
-
-
-def maximize(hwnd: int) -> None:
-    """最大化 + 置前。成员答完一轮时把它的控制台铺满弹到眼前。"""
-    try:
-        user32.ShowWindow(hwnd, SW_MAXIMIZE)
-        _force_foreground(hwnd)
-    except Exception:
-        pass
-
-
-def minimize(hwnd: int) -> None:
-    try:
-        user32.ShowWindow(hwnd, SW_MINIMIZE)
     except Exception:
         pass
 

@@ -258,20 +258,17 @@ def main() -> int:
             cc_signals.clear_pending(sid)
 
     def on_row_click(name: str) -> None:
-        """点成员横条:已运行 → 先把其它还活着的控制台最小化(多屏下都最大化时
-        没法一眼区分),再把它的控制台最大化弹到眼前 + 标记已读(清 turn-ended)。
-        标记已读会把这成员从托盘闪烁里摘掉;多个待处理时逐个点掉、全点完才停闪。
-        未运行/启动中无反应。"""
+        """点工位:已运行 → 把它的控制台**置前**(不最大化、也不动别人)
+        + 标记已读(清 turn-ended)。标记已读会把这个员工从托盘闪烁里摘掉;
+        多个待处理时逐个点掉、全点完才停闪。未运行/启动中无反应。
+
+        **别再最大化、也别去最小化其他控制台**:那是替用户摆桌面——他自己排好的
+        窗口布局(分屏、并排看两个)会被点一下就打乱,而且每点一个人就要重排一次。
+        「靠前」已经够用了。"""
         h = _live_hwnd(name)
         if h is not None:
             card_read.add(name)             # 标记已读:✉ 停闪 + 不再计入托盘闪烁(权限 pending 不删文件)
-            for other in members:           # 只碰缓存里且还活着的句柄,绝不 launch
-                if other.name == name:
-                    continue
-                oh = _live_hwnd(other.name)
-                if oh is not None:
-                    winman.minimize(oh)
-            winman.maximize(h)              # 点谁就把谁最大化(不再自动弹)
+            winman.bring_to_front(h)
             _dismiss(name)
             _refresh_states()               # 立刻让信封消失,不等下一个 tick(~1s)
             m = by_name.get(name)           # 激活即朗读该会话最新一条回复(存在才播)
