@@ -544,6 +544,7 @@ def main() -> int:
             p = cur_peers.get(m.name)
             panel.set_address(m.name, p.name if p is not None else None)
         _dispatch_messages(members)         # 会话之间发了消息 → 小人跑一趟
+        panel.refresh_history()             # 桌上那部手机:几条记录、几条没看过
         # 有消息只显示信封 + 闪托盘,不主动动窗口;窗口最大化交给「点成员」时做。
         _refresh_states()                   # 明暗/运行键 + 信封 + 运行中靠前排序
         # 名字下面那行:用缓存的活句柄直接读控制台标题(claude 起来后会改成它的状态)

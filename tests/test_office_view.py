@@ -428,3 +428,53 @@ def test_screen_timer_runs_only_when_someone_is_busy(win):
     assert win._screen_timer.isActive()
     win.set_run_state("fad", "idle")
     assert not win._screen_timer.isActive()
+
+
+def test_refresh_history_feeds_seats(win, monkeypatch):
+    from claude_cockpit import cc_signals
+    monkeypatch.setattr(cc_signals, "read_history", lambda: [
+        {"from_cwd": ".", "to_name": "etl-7a", "text": "跑一下", "at": 10.0},
+    ])
+    monkeypatch.setattr(cc_signals, "history_stat", lambda: (1.0, 1))
+    win.set_address("etl", "etl-7a")
+    win.refresh_history(force=True)
+    # fad 和 etl 的 cwd 都是 "."(见测试里的 _members),所以两边都该看见这条
+    assert win.seats["fad"].has_phone()
+    assert win.seats["etl"].has_phone()
+
+
+def test_history_menu_has_one_item(win):
+    menu = win.build_menu("fad", "phone")
+    assert [a.text() for a in menu.actions()] == ["查看对话记录"]
+
+
+def test_open_history_marks_seen(win, monkeypatch):
+    from claude_cockpit import cc_signals, settings
+    monkeypatch.setattr(cc_signals, "read_history", lambda: [
+        {"from_cwd": ".", "to_name": "etl-7a", "text": "跑一下", "at": 10.0},
+    ])
+    monkeypatch.setattr(cc_signals, "history_stat", lambda: (1.0, 1))
+    win.set_address("etl", "etl-7a")
+    win.refresh_history(force=True)
+    assert win.seats["fad"]._hist_unread > 0
+    pop = win.open_history("fad")
+    pop.close()
+    assert win.seats["fad"]._hist_unread == 0       # 看过了,红点当场灭
+    assert settings.load()["seen_messages"]["fad"] == 10.0      # 水位落了盘
+
+
+def test_refresh_history_skips_when_file_unchanged(win, monkeypatch):
+    """文件签名没变就不重读——记录文件能长到几百 K,一秒读一遍纯属白烧。"""
+    from claude_cockpit import cc_signals
+    calls = []
+
+    def _read():
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(cc_signals, "read_history", _read)
+    monkeypatch.setattr(cc_signals, "history_stat", lambda: (1.0, 1))
+    win.refresh_history(force=True)
+    win.refresh_history()
+    win.refresh_history()
+    assert len(calls) == 1

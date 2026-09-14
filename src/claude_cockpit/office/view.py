@@ -21,6 +21,8 @@ from .. import layout as layout_mod
 from ..config import OPS_NAME
 from ..layout import GAP
 from .. import settings
+from .. import cc_signals, history as history_mod
+from .history_popup import HistoryPopup
 # 直接 import 函数:set_sessions 的形参就叫 sessions,import 模块会被它遮住
 from ..sessions import issue_tag
 from .dept_area import DeptAreaItem
@@ -116,6 +118,11 @@ class OfficeWindow(QMainWindow):
         self.areas: dict[str, DeptAreaItem] = {}
         self._sessions: dict[str, list] = {}
         self._addrs: dict[str, str | None] = {}
+        # 对话记录:上次读到的文件签名(mtime,size)+ 每个员工的已读水位。
+        # 一秒一轮全量读那个 JSONL 没必要,签名没变就跳过这一轮。
+        self._hist_sig = None
+        self._hist: list[dict] = []
+        self._seen: dict[str, float] = dict(settings.load().get("seen_messages") or {})
         self._canvas = _Canvas(self.scene)
         self.setCentralWidget(self._canvas)
         self._save_timer = QTimer(self)
@@ -175,6 +182,7 @@ class OfficeWindow(QMainWindow):
             seat.setScale(lay.scales.get(m.name, 1.0))
             seat.clicked.connect(self.member_clicked.emit)
             seat.speaker_clicked.connect(self.stop_speaking_requested.emit)
+            seat.phone_clicked.connect(self.open_history)
             seat.moved.connect(self._on_seat_dropped)
             self.seats[m.name] = seat
         ops = self.seats.get(OPS_NAME)      # 机柜摆在运维桌上
@@ -183,6 +191,10 @@ class OfficeWindow(QMainWindow):
             # 运维没有文件堆:那叠纸的意思是「几条历史会话、右键挑一条接着聊」,
             # 他不走这条路;腾出来的地方正好给机柜。
             ops.set_papers_enabled(False)
+        # 重建后的工位立刻带上手机(否则要等下一轮 tick 才冒出来):
+        # 这里 _seen / _addrs 都已经就位——前者在 __init__ 里 rebuild 之前读好,
+        # 后者在本方法开头按活着的员工筛过一遍。
+        self.refresh_history(force=True)
         self.refit_scene()
         # 窗口尺寸和镜头都只在第一次装配时设:rebuild 每次增删改成员都会跑,
         # 每次都设的话,改一个成员的 emoji 就把窗口缩回存盘尺寸、视角弹回左上角
@@ -377,6 +389,67 @@ class OfficeWindow(QMainWindow):
     def set_address(self, name: str, addr: str | None) -> None:
         self._addrs[name] = addr
 
+    def refresh_history(self, force: bool = False) -> None:
+        """刷新每张桌上那部手机:几条记录、几条没看过。由 main 的 1s tick 调。
+
+        **文件签名没变就不重读**——记录文件可以长到几百 K,一秒读一遍纯属白烧。
+        """
+        sig = cc_signals.history_stat()
+        if not force and sig == self._hist_sig:
+            return
+        self._hist_sig = sig
+        self._hist = cc_signals.read_history()
+        for m in self._members:
+            entries = history_mod.for_member(self._hist, m, self._addrs, self._members)
+            seat = self.seats.get(m.name)
+            if seat is not None:
+                seat.set_history(
+                    len(entries),
+                    history_mod.unread_count(entries, self._seen.get(m.name, 0.0)))
+
+    def open_history(self, name: str):
+        """点手机(或右键那一项):弹记录窗 + 把这个人的已读水位推到最新。"""
+        m = next((x for x in self._members if x.name == name), None)
+        if m is None:
+            return None
+        entries = history_mod.for_member(cc_signals.read_history(), m,
+                                         self._addrs, self._members)
+        if entries:
+            self._seen[name] = max(e.at for e in entries)
+            self._save_seen()
+            self.refresh_history(force=True)        # 红点立刻灭,不等下一轮 tick
+        # 窗以办公室为父:WA_DeleteOnClose 只管关掉时销毁 C++ 那半边,**在此之前**
+        # 得有人持有它——父子关系就是那个持有者,不然出了这个函数就没人引用了。
+        pop = HistoryPopup(name, entries, self)
+        seat = self.seats.get(name)
+        if seat is not None:
+            at = self._canvas.mapToGlobal(
+                self._canvas.mapFromScene(seat.mapToScene(seat.r_phone().center())))
+            pop.move(at.x() + 12, at.y() + 12)
+        pop.show()
+        return pop
+
+    def _save_seen(self) -> None:
+        """已读水位立刻落盘(用户点一次才写一次,不用防抖)。
+
+        和 save_layout 一样是「现读 settings → 只改自己那一段 → 写回」:两边都**当场**
+        重读,谁也不揣着旧 dict,所以不会把对方刚写的那段吃掉。
+        失败静默——水位丢了最多多亮一次红点,不值得为它弹错误框。
+        """
+        try:
+            s = settings.load()
+            s["seen_messages"] = self._seen
+            settings.save(s)
+        except Exception:
+            pass
+
+    def _menu_phone(self, name: str) -> QMenu:
+        """点桌上那部手机:只有一件事——把对话记录翻出来看。
+        (左键点它是同一件事的快捷方式,同音响。)"""
+        menu = QMenu(self)
+        menu.addAction("查看对话记录").triggered.connect(lambda: self.open_history(name))
+        return menu
+
     def set_order(self, names) -> None:
         """空操作:画布上的位置由用户摆放,排序无意义(保留签名给 main.py)。"""
 
@@ -480,6 +553,7 @@ class OfficeWindow(QMainWindow):
         """工位的右键菜单。**按落点分发**——点谁就是对谁下命令:
 
             person → 上班 / 下班          files → 会话历史(续接 / 删除)
+            phone  → 对话记录(会话间收发的那些消息)
             其余   → 这个成员本身(地址 / 目录 / 编辑 / 删除)
 
         单独成方法(不在 contextMenuEvent 里现搭):exec 阻塞,不抽出来没法单测。
@@ -488,6 +562,8 @@ class OfficeWindow(QMainWindow):
             return self._menu_person(name)
         if where == "files":
             return self._menu_files(name)
+        if where == "phone":
+            return self._menu_phone(name)
         return self._menu_member(name)
 
     def build_rack_menu(self) -> QMenu:
