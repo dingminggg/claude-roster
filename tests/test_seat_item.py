@@ -278,12 +278,28 @@ def test_phone_appears_with_history(seat):
     assert seat.hit(seat.r_phone().center()) == "phone"
 
 
-def test_phone_hit_rect_disjoint_from_others(seat):
-    """四块命中区两两不相交——叠了就会「点手机弹控制台」这种串台。"""
+@pytest.mark.parametrize("with_rack", [False, True])
+def test_phone_hit_rect_disjoint_from_others(seat, with_rack):
+    """命中区两两不相交——叠了就会「点手机弹控制台」这种串台。
+
+    **按工位的两种形态各验一遍**:普通工位(桌右侧是那叠文件)和运维那张(桌右侧
+    换成机柜)。文件堆和机柜**永不共存**(`set_papers_enabled(False)`),它俩正好
+    都占着「显示器右边」那块地,所以只能分开验——一起塞进同一个字典必然假报。
+    手机在桌子左端,两种形态里都在,所以两轮都卡住了它。
+    """
+    from claude_cockpit.services import Service
     seat.set_history(3, 1)
     seat.set_session_count(3)
+    if with_rack:                       # 运维那张:机柜顶掉文件堆
+        seat.set_services([Service("mysql", 3306)])
+        seat.set_papers_enabled(False)
+        assert seat.has_rack() and not seat.has_papers()
+    else:
+        assert seat.has_papers() and not seat.has_rack()
     rects = {"phone": seat.r_phone(), "person": seat.r_person(),
-             "speaker": seat.r_speaker(), "files": seat.r_files()}
+             "speaker": seat.r_speaker()}
+    rects["rack" if with_rack else "files"] = (
+        seat.r_rack() if with_rack else seat.r_files())
     names = sorted(rects)
     for i, a in enumerate(names):
         for b in names[i + 1:]:

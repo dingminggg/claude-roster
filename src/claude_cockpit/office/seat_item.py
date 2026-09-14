@@ -409,7 +409,7 @@ class SeatItem(QGraphicsObject):
         return rack_item.hit_rect()
 
     def hit(self, pos: QPointF) -> str:
-        """局部坐标 → "speaker" / "person" / "files" / "seat"。
+        """局部坐标 → "speaker" / "person" / "rack" / "files" / "phone" / "seat"。
 
         分区是有语义的:点人 = 管他上下班,点文件 = 管他的会话历史。
         paint 和这里共用同一份 r_*,两处各写一遍必然漂移。
