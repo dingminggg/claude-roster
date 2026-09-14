@@ -78,3 +78,9 @@ agents:
   color: '#3b82f6'
   permission_mode: default
   dept: 后勤
+- name: ops
+  cwd: C:\Users\LQ\.claude\ops
+  emoji: 🛠️
+  color: '#6f7b8d'
+  permission_mode: default
+  dept: 机房

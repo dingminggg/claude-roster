@@ -9,6 +9,11 @@ import yaml
 
 NAME_RE = re.compile(r"^[\w-]+$")
 
+# 运维是**机房那个固定岗位**:和别人一样是 agents.yaml 里的一条(cwd 你自己填),
+# 但名字和部门锁死、面板里不给编辑/删除——它是这间办公室的编制,不是你临时拉的人。
+OPS_NAME = "ops"
+OPS_DEPT = "机房"
+
 
 @dataclass
 class Member:
@@ -48,6 +53,8 @@ def load_config(path: str | Path = "agents.yaml") -> list[Member]:
             permission_mode=item.get("permission_mode", "default"),
             dept=str(item.get("dept") or "").strip(),
         )
+        if m.name == OPS_NAME:      # 部门锁死:运维只能待在机房(拖出去也会被扳回来)
+            m.dept = OPS_DEPT
         validate_member(m)
         members.append(m)
     if not members:

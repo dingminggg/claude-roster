@@ -1,4 +1,4 @@
-"""机房:一台机柜(一层一个服务)+ 运维工位 + 会巡检的运维本人。"""
+"""机房:一台机柜(一层一个服务)+ 运维那个固定岗位(内置员工)+ 巡检。"""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -13,8 +13,8 @@ from PySide6.QtWidgets import QApplication
 from claude_cockpit import layout as layout_mod
 from claude_cockpit import services
 from claude_cockpit.config import Member
-from claude_cockpit.office import rack_item
-from claude_cockpit.office.rack_item import OpsDeskItem, OpsItem, RackItem
+from claude_cockpit.config import OPS_DEPT, OPS_NAME
+from claude_cockpit.office.rack_item import RackItem
 from claude_cockpit.office.view import OfficeWindow
 
 
@@ -27,7 +27,8 @@ def app():
 def win(app, tmp_path, monkeypatch):
     from claude_cockpit import settings
     monkeypatch.setattr(settings, "_path", lambda: tmp_path / "settings.json")
-    members = [Member(name="fad", cwd=Path("."), dept="服务端")]
+    members = [Member(name="fad", cwd=Path("."), dept="服务端"),
+               Member(name=OPS_NAME, cwd=Path("."), dept=OPS_DEPT)]
     return OfficeWindow(members, services.DEFAULTS)
 
 
@@ -97,65 +98,58 @@ def test_rack_paints_in_every_state(app):
         _paint(rack)
 
 
-# ---------- 运维工位 ----------
-def test_ops_desk_paints_and_offers_a_seat(app):
-    desk = OpsDeskItem()
-    _paint(desk)
-    assert desk.seat_point().x() > 0 and desk.seat_point().y() > 0
+# ---------- 运维 ----------
+def test_ops_is_a_normal_employee_with_a_normal_seat(win):
+    """运维有会话,所以他就是个员工——工位、状态屏、会话历史全走 SeatItem 那套,
+    别再为他自绘一套(自绘那版少一半功能)。"""
+    assert OPS_NAME in win.seats
+    assert win.seats[OPS_NAME].parentItem() is win.areas[layout_mod.SERVER_ROOM]
 
 
-# ---------- 运维本人 ----------
-def test_ops_starts_at_the_desk(app):
-    ops = OpsItem()
-    ops.set_points(QPointF(20, 100), QPointF(300, 100), 140)
-    assert ops.phase() == rack_item.DESK
-    _paint(ops)
+def test_ops_department_is_locked(app, tmp_path, monkeypatch):
+    """名字和部门锁死:yaml 里写别的部门也会被扳回机房。"""
+    from claude_cockpit.config import load_config
+    p = tmp_path / "agents.yaml"
+    p.write_text("agents:\n  - {name: ops, cwd: '.', dept: 后勤}\n", encoding="utf-8")
+    assert load_config(p)[0].dept == OPS_DEPT
 
 
-def test_alarm_sends_him_to_the_rack(app):
-    ops = OpsItem()
-    ops.set_points(QPointF(20, 100), QPointF(300, 100), 140)
-    ops.set_alarm(True)
-    assert ops.phase() == rack_item.TO_RACK
-    _paint(ops)                       # 走路时画站姿
+def test_patrol_sends_him_to_the_rack(win):
+    win.seats[OPS_NAME].set_run_state("idle")
+    assert win.patrol() is True
+    assert win._walkers and win._away.get(OPS_NAME)   # 工位画成空椅子
 
 
-def test_he_walks_the_whole_way_then_stands_there(app):
-    ops = OpsItem()
-    ops.set_points(QPointF(20, 100), QPointF(300, 100), 140)
-    ops.set_alarm(True)
-    for _ in range(int(rack_item.WALK_MS / rack_item.STEP_MS) + 2):
-        ops._tick()
-    assert ops.phase() == rack_item.AT_RACK
-    assert abs(ops.pos().x() + ops.W / 2 - 300) < 1      # 站到柜子跟前了
+def test_no_patrol_when_ops_is_off_work(win):
+    """没上班就不演:空椅子上站起来一个人太灵异。"""
+    win.seats[OPS_NAME].set_run_state("down")
+    assert win.patrol() is False
 
 
-def test_he_does_not_go_home_while_it_is_still_broken(app):
-    ops = OpsItem()
-    ops.set_points(QPointF(20, 100), QPointF(300, 100), 140)
-    ops.set_alarm(True)
-    for _ in range(int(rack_item.WALK_MS / rack_item.STEP_MS) + 2):
-        ops._tick()
-    ops._go()                         # 看够了:还没修好 → 继续站着
-    assert ops.phase() == rack_item.AT_RACK
-    ops.set_alarm(False)              # 修好了
-    ops._go()
-    assert ops.phase() == rack_item.TO_DESK
+def test_report_names_the_broken_ones(win):
+    win.set_service_states({s.name: services.UP for s in services.DEFAULTS})
+    assert "都正常" in win.service_report()
+    win.set_service_states({"apache": services.DOWN})
+    report = win.service_report()
+    assert "apache" in report and "mysql" not in report
 
 
-def test_the_path_bends_through_the_lane(app):
-    """走折线不走直线:直连会从桌面上横穿过去。中途必须绕到过道那条线上。"""
-    ops = OpsItem()
-    ops.set_points(QPointF(20, 100), QPointF(300, 100), 160)
-    ops.set_alarm(True)
-    assert ops._at(0.5).y() == 160
-    assert ops._at(0.0) == QPointF(20, 100) and ops._at(1.0) == QPointF(300, 100)
+def test_going_red_sends_him_over_at_once(win):
+    """刚出事就派他过去,不等下一轮巡检。"""
+    win.seats[OPS_NAME].set_run_state("idle")
+    win.set_service_states({s.name: services.UP for s in services.DEFAULTS})
+    assert not win._walkers
+    win.set_service_states({"redis": services.DOWN})
+    assert win._walkers                     # 走起来了
+    n = len(win._walkers)
+    win.set_service_states({"apache": services.DOWN})
+    assert len(win._walkers) == n           # 还没修好的期间不反复派人
 
 
 # ---------- 装配 ----------
-def test_server_room_has_a_rack_and_an_ops_desk(win):
+def test_server_room_has_a_rack(win):
     assert layout_mod.SERVER_ROOM in win.areas
-    assert win.rack is not None and win.ops_desk is not None and win.ops is not None
+    assert win.rack is not None
 
 
 def test_no_services_no_server_room(app, tmp_path, monkeypatch):
@@ -172,20 +166,12 @@ def test_states_reach_the_rack(win):
     assert win.rack.state_of("redis") == services.DOWN
 
 
-def test_he_leaves_his_desk_only_when_something_is_wrong(win):
-    win.set_service_states({s.name: services.UP for s in services.DEFAULTS})
-    assert not win.ops.is_alarmed()
-    win.set_service_states({"apache": services.DOWN})
-    assert win.ops.is_alarmed()
-
-
 def test_room_positions_are_saved_under_the_svc_prefix(win):
     win.save_layout()
     from claude_cockpit import settings
     seats = settings.load()["office"]["seats"]
     assert layout_mod.SVC_PREFIX + "rack" in seats
-    assert layout_mod.SVC_PREFIX + "opsdesk" in seats
-    assert "fad" in seats           # 员工的坐标没被机房挤掉
+    assert "fad" in seats and OPS_NAME in seats     # 运维按员工存,不带前缀
 
 
 def test_rack_menu_is_read_only_with_one_entry_per_layer(win):
@@ -208,3 +194,11 @@ def test_blink_tick_drives_the_rack_too(win):
     before = win._blink_on
     win.tick_blink()
     assert win._blink_on is not before
+
+
+def test_ops_cannot_be_edited_or_deleted_from_the_panel(win):
+    """固定岗位:置灰而不是隐藏(隐藏了用户会以为功能没了)。"""
+    acts = {a.text(): a for a in win.build_menu(OPS_NAME).actions()}
+    assert acts["编辑"].isEnabled() is False and acts["删除"].isEnabled() is False
+    normal = {a.text(): a for a in win.build_menu("fad").actions()}
+    assert normal["编辑"].isEnabled() and normal["删除"].isEnabled()

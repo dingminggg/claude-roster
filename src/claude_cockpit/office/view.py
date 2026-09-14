@@ -11,6 +11,8 @@ set_order 是空操作:画布上的位置由用户自己摆,排序没有意义�
 """
 from __future__ import annotations
 
+import random
+
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -18,10 +20,11 @@ from PySide6.QtWidgets import (
 )
 
 from .. import layout as layout_mod
+from ..config import OPS_NAME
 from ..layout import GAP, SERVER_ROOM, SVC_PREFIX
 from .. import settings
 from .dept_area import DeptAreaItem
-from .rack_item import OpsDeskItem, OpsItem, RackItem
+from .rack_item import STATE_TEXT, RackItem
 from .seat_item import SeatItem
 from .walker_item import WalkerItem
 from . import theme
@@ -29,9 +32,12 @@ from .theme import CANVAS as BG, GRID, TILE, TILE_ALT
 
 # 每个工位自己的大小档位。**整体缩放已经退休**:那是把所有人一起缩,等于没解决
 # 「成员多了看不过来」——真正要的是把不常用的单独缩小。
-# 机房里那两个格子。一台柜子装下所有服务,所以机房只有「柜子」和「运维工位」
-# 两样占位;它们和员工工位共用 layout 那套槽位/吸附/存盘(键带 svc: 前缀)。
-ROOM_SLOTS = ("rack", "opsdesk")
+# 机房里的非员工占位:只有机柜一样(运维本人是**真员工**,占的是普通工位格子)。
+# 它和员工工位共用 layout 那套槽位/吸附/存盘,键带 svc: 前缀,和员工名撞不上。
+ROOM_SLOTS = ("rack",)
+
+# 巡检:隔多久去机柜前看一眼(随机,免得像整点报时一样准)。
+PATROL_MS = (60000, 120000)
 
 SEAT_SCALES = (("标准", 1.0), ("小", 0.7), ("更小", 0.5))
 SAVE_DEBOUNCE_MS = 400
@@ -123,8 +129,6 @@ class OfficeWindow(QMainWindow):
         self.scene = QGraphicsScene(self)
         self.seats: dict[str, SeatItem] = {}
         self.rack: RackItem | None = None
-        self.ops_desk: OpsDeskItem | None = None
-        self.ops: OpsItem | None = None
         self._services = list(services)
         self.areas: dict[str, DeptAreaItem] = {}
         self._sessions: dict[str, list] = {}
@@ -146,6 +150,10 @@ class OfficeWindow(QMainWindow):
         self._always_on_top = False      # 与 set_always_on_top 的「值没变就不动」对齐
         self._framed = False             # 镜头是否已对准过办公室(只在首次装配时对)
         self._walkers: list[WalkerItem] = []   # 正在跑腿送信的小人
+        self._all_green = True                # 上一轮服务是不是全绿(用来只在「刚出事」时派人)
+        self._patrol_timer = QTimer(self)     # 运维巡检:隔一阵去机柜前看一眼
+        self._patrol_timer.setSingleShot(True)
+        self._patrol_timer.timeout.connect(self._on_patrol_timer)
         self._away: dict[str, int] = {}       # 谁离座了(同一个人可能连送几趟)
         self.rebuild(members)
 
@@ -156,8 +164,6 @@ class OfficeWindow(QMainWindow):
         # 一碰就 RuntimeError(踩过)。
         self.seats.clear()
         self.rack = None
-        self.ops_desk = None
-        self.ops = None
         self.areas.clear()
         self._walkers.clear()
         self._away.clear()
@@ -175,7 +181,7 @@ class OfficeWindow(QMainWindow):
         # 机柜按「住在机房的占位成员」参与布局:地毯、槽位、吸附、存盘全走同一套,
         # 机房不需要自己的布局账本(键带 svc: 前缀,和员工名撞不上)。
         occupants = list(self._members)
-        if self._services:      # 一台柜子 + 一张运维工位,不再是一个服务一格
+        if self._services:      # 机柜占一格(运维本人是真员工,自带工位)
             occupants += [_RackStub(SVC_PREFIX + k, SERVER_ROOM)
                           for k in ROOM_SLOTS]
         lay = layout_mod.ensure(parsed, occupants)
@@ -198,20 +204,12 @@ class OfficeWindow(QMainWindow):
             seat.moved.connect(self._on_seat_dropped)
             self.seats[m.name] = seat
         if self._services:
-            area = self.areas[SERVER_ROOM]
             self.rack = RackItem(self._services)
-            self.ops_desk = OpsDeskItem()
-            for key, item in zip(ROOM_SLOTS, (self.rack, self.ops_desk)):
-                item.setParentItem(area)
-                item.setPos(*lay.seats[SVC_PREFIX + key])
-                item.moved.connect(self._on_room_item_dropped)
-            self.ops = OpsItem()    # 人画在柜子和桌子之上(他会走到它们跟前)
-            self.ops.setParentItem(area)
-            self.ops.setZValue(1)
-            self.ops.phase_changed.connect(self._on_ops_phase)
-            self._on_ops_phase(self.ops.phase())
-            self._place_ops()
+            self.rack.setParentItem(self.areas[SERVER_ROOM])
+            self.rack.setPos(*lay.seats[SVC_PREFIX + "rack"])
+            self.rack.moved.connect(self._on_room_item_dropped)
         self.refit_scene()
+        self._sync_patrol_timer()
         # 窗口尺寸和镜头都只在第一次装配时设:rebuild 每次增删改成员都会跑,
         # 每次都设的话,改一个成员的 emoji 就把窗口缩回存盘尺寸、视角弹回左上角
         if not self._framed:
@@ -232,6 +230,8 @@ class OfficeWindow(QMainWindow):
         if seat is not None:
             landed = self._area_at(seat)
             here = seat.parentItem()
+            if name == OPS_NAME:        # 运维的部门锁死:拖到哪儿都还是机房的人
+                landed = None
             if landed and self.areas.get(landed) is not here:
                 area = self.areas[landed]
                 scene_pos = seat.scenePos()
@@ -242,38 +242,11 @@ class OfficeWindow(QMainWindow):
         self._queue_save()
 
     def _on_room_item_dropped(self, name: str) -> None:
-        """机柜 / 运维工位拖完:只咬槽位 + 存盘,**不跟着换部门**——员工工位拖到哪块
-        部门区就归哪个部门,机房这两样没有这回事(拖出去也不该把 mysql 划进后勤组)。
-        人要跟着挪:他的落脚点是从这两样的位置算出来的。"""
-        item = self.rack if name == "rack" else self.ops_desk
-        if item is not None:
-            self._snap(item)
-        self._place_ops()
+        """机柜拖完:只咬槽位 + 存盘,**不跟着换部门**——员工工位拖到哪块部门区就归
+        哪个部门,机柜没有这回事(拖出去也不该把 mysql 划进后勤组)。"""
+        if self.rack is not None:
+            self._snap(self.rack)
         self._queue_save()
-
-    def _on_ops_phase(self, phase: str) -> None:
-        """运维回到工位 → 由**工位**把人画上(坐姿要和椅子穿插,跨两个图元排不了
-        画序);离开 → 工位画空椅子。和员工跑腿送信时同一套口径。"""
-        at_desk = phase == "desk"
-        if self.ops_desk is not None:
-            self.ops_desk.set_occupied(at_desk)
-
-    def _place_ops(self) -> None:
-        """把运维的两个落脚点(工位的椅子、柜子正前方)喂给他。
-
-        **位置由这里算、不由图元自己去找**:图元之间不该互相认识(机柜不必知道
-        运维工位在哪)。过道取两样家具落脚点再往下一点——从那儿横着走不穿家具。
-        """
-        if self.ops is None or self.rack is None or self.ops_desk is None:
-            return
-        desk = self.ops_desk.pos() + self.ops_desk.seat_point()
-        rack = self.rack.pos() + self.rack.front_point()
-        # 过道压在两样家具落脚点的下面(从那儿横着走不穿家具),但**不能出机房**:
-        # 柜子的落脚点已经很靠格子下沿,再加一截就走到地毯外面去了(踩过)。
-        area = self.ops.parentItem()
-        floor = area.h - 8.0 if area is not None else rack.y() + 14.0
-        lane = min(max(desk.y(), rack.y()) + 14.0, floor)
-        self.ops.set_points(desk, rack, lane)
 
     def _on_area_changed(self, name: str) -> None:
         """地毯拖完/拉伸完:位置咬到地砖网格,边缘就不会歪在砖缝中间。"""
@@ -282,8 +255,6 @@ class OfficeWindow(QMainWindow):
             g = theme.TILE
             area.setPos(round(area.pos().x() / g) * g,
                         round(area.pos().y() / g) * g)
-            if self.ops is not None and self.ops.parentItem() is area:
-                self._place_ops()       # 区域挪了,人的落脚点跟着重算
         self._queue_save()
 
     def _snap(self, seat) -> None:
@@ -291,8 +262,8 @@ class OfficeWindow(QMainWindow):
         area = seat.parentItem()
         if not isinstance(area, DeptAreaItem):
             return
-        siblings = [i for i in (list(self.seats.values())
-                                + [self.rack, self.ops_desk]) if i is not None]
+        siblings = [i for i in (list(self.seats.values()) + [self.rack])
+                    if i is not None]
         taken = [(s.pos().x(), s.pos().y()) for s in siblings
                  if s is not seat and s.parentItem() is area]
         x, y = layout_mod.snap_to_slot((seat.pos().x(), seat.pos().y()),
@@ -369,9 +340,11 @@ class OfficeWindow(QMainWindow):
         **有一层不绿他就一直站在柜子前**——那是余光信号,看出是哪一层挂了还得靠柜灯。"""
         if self.rack is None:
             return
+        was_ok = self._all_green
         self.rack.set_states(states)
-        if self.ops is not None:
-            self.ops.set_alarm(not self.rack.all_green())
+        self._all_green = self.rack.all_green()
+        if was_ok and not self._all_green:
+            self.patrol()           # 刚出事:立刻派他过去看一眼,不等下一轮巡检
 
     def set_run_state(self, name: str, state: str) -> None:
         seat = self.seats.get(name)
@@ -456,6 +429,50 @@ class OfficeWindow(QMainWindow):
         if self.rack is not None:
             self.rack.set_blink(self._blink_on)
 
+    # ---------- 巡检 ----------
+    def _sync_patrol_timer(self) -> None:
+        """有机柜才开表:没有服务清单时机房都不存在,更没有巡检这回事。"""
+        on = self.rack is not None and OPS_NAME in self.seats
+        if on and not self._patrol_timer.isActive():
+            self._patrol_timer.start(random.randint(*PATROL_MS))
+        elif not on:
+            self._patrol_timer.stop()
+
+    def _on_patrol_timer(self) -> None:
+        self.patrol()
+        self._patrol_timer.start(random.randint(*PATROL_MS))   # 下一趟另摇一个间隔
+
+    def patrol(self) -> bool:
+        """运维起身走到机柜前、**报一句服务状态**、再走回工位。
+
+        复用送信那套小人:走过去这一趟本身没什么信息量,把状态写进气泡才值这一趟。
+        运维没上班(控制台没开)就不演——空椅子上站起来一个人太灵异。
+        """
+        seat, rack = self.seats.get(OPS_NAME), self.rack
+        if seat is None or rack is None or not seat.is_up():
+            return False
+        return self._launch_walker(OPS_NAME, self._patrol_path(seat, rack),
+                                   self.service_report())
+
+    def service_report(self) -> str:
+        """气泡里那句话:全绿报平安,否则**点名**是哪几个不对——
+        「有服务挂了」还得再凑近看柜灯,等于这趟白跑。"""
+        if self.rack is None:
+            return ""
+        bad = [f"{s.name} {STATE_TEXT.get(self.rack.state_of(s.name), '')}"
+               for s in self.rack.services
+               if self.rack.state_of(s.name) != "up"]
+        if not bad:
+            return f"{len(self.rack.services)} 个服务都正常"
+        return "、".join(bad)
+
+    def _patrol_path(self, seat, rack) -> list[QPointF]:
+        """工位 → 机柜正前方。同送信那条:退到过道 → 横着走 → 拐到柜子前面。"""
+        start = seat.mapToScene(seat.chair_pos())
+        end = rack.mapToScene(rack.front_point())
+        lane = max(self._lane_y(seat), end.y() + GAP / 2)
+        return [start, QPointF(start.x(), lane), QPointF(end.x(), lane), end]
+
     # ---------- 送信的小人 ----------
     MAX_WALKERS = 4          # 同时最多几个在跑:再多就是一屋子人乱窜,反而看不出谁找谁
 
@@ -469,13 +486,18 @@ class OfficeWindow(QMainWindow):
         a, b = self.seats.get(from_name), self.seats.get(to_name)
         if a is None or b is None or a is b:
             return False
-        if len(self._walkers) >= self.MAX_WALKERS:
+        return self._launch_walker(from_name, self._walk_path(a, b), text)
+
+    def _launch_walker(self, from_name: str, path, text: str) -> bool:
+        """放一个小人上路(送信和巡检共用):记账、把工位画成空椅子、走完自己摘掉。"""
+        seat = self.seats.get(from_name)
+        if seat is None or len(self._walkers) >= self.MAX_WALKERS:
             return False
-        w = WalkerItem(a.color, self._walk_path(a, b), text)
+        w = WalkerItem(seat.color, path, text)
         self.scene.addItem(w)
         self._walkers.append(w)
         self._away[from_name] = self._away.get(from_name, 0) + 1
-        a.set_away(True)                    # 人走了,工位上那把椅子空着
+        seat.set_away(True)                 # 人走了,工位上那把椅子空着
         w.destroyed.connect(lambda *_: self._drop_walker(w, from_name))
         return True
 
@@ -629,10 +651,18 @@ class OfficeWindow(QMainWindow):
             copy.setToolTip("还没探到这个员工的会话地址(会话没起来或刚启动)")
         menu.addAction("打开目录").triggered.connect(
             lambda: self.open_dir_requested.emit(name))
-        menu.addAction("编辑").triggered.connect(
-            lambda: self.edit_requested.emit(name))
-        menu.addAction("删除").triggered.connect(
-            lambda: self.delete_requested.emit(name))
+        edit = menu.addAction("编辑")
+        rm = menu.addAction("删除")
+        if name == OPS_NAME:
+            # 运维是机房的**固定岗位**,不是你临时拉的人:面板里不给改也不给删
+            # (要换目录就去 agents.yaml 改那一行)。**置灰而不是隐藏**——隐藏了
+            # 用户会以为功能没了,同「复制会话地址」那条的口径。
+            for act in (edit, rm):
+                act.setEnabled(False)
+                act.setToolTip("运维是机房的固定岗位,改 agents.yaml 里那一行")
+        else:
+            edit.triggered.connect(lambda: self.edit_requested.emit(name))
+            rm.triggered.connect(lambda: self.delete_requested.emit(name))
         return menu
 
     def build_canvas_menu(self, area: str | None, scene_pos=None) -> QMenu:
@@ -696,9 +726,9 @@ class OfficeWindow(QMainWindow):
         lay = layout_mod.Layout(
             areas={n: a.geometry() for n, a in self.areas.items()},
             seats={**{n: (s.pos().x(), s.pos().y()) for n, s in self.seats.items()},
-                   **{SVC_PREFIX + k: (i.pos().x(), i.pos().y())
-                      for k, i in zip(ROOM_SLOTS, (self.rack, self.ops_desk))
-                      if i is not None}},
+                   **({SVC_PREFIX + "rack": (self.rack.pos().x(),
+                                             self.rack.pos().y())}
+                      if self.rack is not None else {})},
             scales={n: s.scale() for n, s in self.seats.items() if s.scale() != 1.0},
             depts=sorted(self.areas),
             window=(self.width(), self.height()),
