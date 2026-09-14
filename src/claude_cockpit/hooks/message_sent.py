@@ -28,8 +28,12 @@ def handle(payload: dict) -> None:
         return
     to_name = str(tool_input.get("to") or "").strip()
     cwd = str(payload.get("cwd") or "").strip()
+    # 正文也记一笔:气泡里要显示「说了什么」,不然一屋子人跑来跑去只知道谁找谁。
+    # 长度在写入侧就截断(见 cc_signals.MSG_MAX)——气泡只有一两行,整篇正文
+    # 既画不下,也没必要落到磁盘上。
+    text = str(tool_input.get("message") or "")
     if to_name and cwd:
-        cc_signals.write_message(cwd, to_name)
+        cc_signals.write_message(cwd, to_name, text)
 
 
 def main() -> int:

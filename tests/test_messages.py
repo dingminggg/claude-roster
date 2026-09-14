@@ -2,6 +2,8 @@
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
 from claude_cockpit import cc_signals
@@ -150,3 +152,72 @@ def test_walker_moves_by_arc_length(app, office):
             return
         walked += seg
     raise AssertionError("没走到一半")
+
+
+# ---------- 气泡里的话 ----------
+def test_hook_records_the_message_body(tmp_path, monkeypatch):
+    """气泡要显示「说了什么」,所以 hook 得把正文也记一笔。"""
+    monkeypatch.setattr(cc_signals, "messages_dir", lambda: tmp_path / "messages")
+    message_sent.handle({"tool_name": "SendMessage", "cwd": r"C:\proj\fad",
+                         "tool_input": {"to": "etl-7a", "message": "帮我跑一下 ETL"}})
+    got = cc_signals.take_messages()
+    assert got[0]["text"] == "帮我跑一下 ETL"
+
+
+def test_body_is_truncated_and_flattened_on_write(tmp_path, monkeypatch):
+    """换行压成空格(气泡自己排版)、超长在写入侧就截断(整篇正文既画不下也不必落盘)。"""
+    monkeypatch.setattr(cc_signals, "messages_dir", lambda: tmp_path / "messages")
+    cc_signals.write_message(r"C:\proj\fad", "etl-7a", "第一行\n第二行\t还有" + "啊" * 300)
+    text = cc_signals.take_messages()[0]["text"]
+    assert "\n" not in text and "第一行 第二行 还有" in text
+    assert len(text) == cc_signals.MSG_MAX
+
+
+def test_old_signals_without_a_body_still_work(tmp_path, monkeypatch):
+    """没正文的老信号(或空消息)不能崩,退回原来那三个点。"""
+    monkeypatch.setattr(cc_signals, "messages_dir", lambda: tmp_path / "messages")
+    cc_signals.write_message(r"C:\proj\fad", "etl-7a")
+    assert cc_signals.take_messages()[0]["text"] == ""
+
+
+def test_wrap_folds_by_pixel_width_not_character_count(app):
+    """按字宽折:中文一个字是英文的两倍宽,按字数折两种话会排成完全不同的长度。"""
+    from claude_cockpit.office import walker_item as wi
+    assert wi.wrap("") == []
+    one = wi.wrap("短")
+    assert one == ["短"]
+    many = wi.wrap("啊" * 200)
+    assert len(many) == wi.BUBBLE_LINES and many[-1].endswith("…")
+    for line in many:
+        assert wi._FM.horizontalAdvance(line) <= wi.BUBBLE_W - wi.BUBBLE_PAD * 2
+
+
+def test_bubble_grows_with_the_text(app, office):
+    from claude_cockpit.office import walker_item as wi
+    quiet = wi.WalkerItem(QColor("#888"), [QPointF(0, 0), QPointF(10, 0)])
+    talky = wi.WalkerItem(QColor("#888"), [QPointF(0, 0), QPointF(10, 0)],
+                          "帮我把 ETL 重跑一遍,顺便看看昨天那批数据")
+    assert talky._bh > quiet._bh
+    # 包围盒跟着气泡长,否则长气泡会被裁掉一块
+    assert talky.boundingRect().height() > quiet.boundingRect().height()
+    # 停留时间按字数算:一句「好了」和一段说明给同样的时间要么干等、要么没读完
+    assert talky._wait_ms > quiet._wait_ms
+
+
+def test_walker_paints_its_bubble(app, office):
+    from PySide6.QtGui import QImage, QPainter
+    from claude_cockpit.office import walker_item as wi
+    for text in ("", "跑完了", "啊" * 200):
+        w = wi.WalkerItem(QColor("#888"), [QPointF(0, 0), QPointF(10, 0)], text)
+        w._phase = "wait"
+        img = QImage(240, 200, QImage.Format.Format_ARGB32)
+        p = QPainter(img)
+        try:
+            w.paint(p, None, None)
+        finally:
+            p.end()
+
+
+def test_the_body_reaches_the_walker(app, office):
+    office.send_walker("fad", "etl", "改好了")
+    assert office._walkers[-1]._lines == ["改好了"]

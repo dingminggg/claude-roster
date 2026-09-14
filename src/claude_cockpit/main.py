@@ -486,7 +486,7 @@ def main() -> int:
             src = by_cwd.get(norm_path(str(rec.get("from_cwd") or "")))
             dst = by_session.get(str(rec.get("to_name") or ""))
             if src and dst:
-                panel.send_walker(src, dst)
+                panel.send_walker(src, dst, str(rec.get("text") or ""))
 
     def tick() -> None:
         # 清掉已被关闭的窗口句柄(并落盘),让 ▶ 恢复可启动、缓存不留死句柄

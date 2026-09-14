@@ -459,10 +459,11 @@ class OfficeWindow(QMainWindow):
     # ---------- 送信的小人 ----------
     MAX_WALKERS = 4          # 同时最多几个在跑:再多就是一屋子人乱窜,反而看不出谁找谁
 
-    def send_walker(self, from_name: str, to_name: str) -> bool:
-        """`from_name` 给 `to_name` 发了消息 → 放一个小人走过去说一句再走回来。
+    def send_walker(self, from_name: str, to_name: str, text: str = "") -> bool:
+        """`from_name` 给 `to_name` 发了消息 → 放一个小人走过去说一句再走回来,
+        `text` 是消息正文(显示在气泡里)。
 
-        两头都得是画布上**认得的**成员;自己给自己发不演(那是 SendMessage 到自己,
+        两头都得是画布上**认得的**员工;自己给自己发不演(那是 SendMessage 到自己,
         画出来是原地抖一下,没意义)。
         """
         a, b = self.seats.get(from_name), self.seats.get(to_name)
@@ -470,7 +471,7 @@ class OfficeWindow(QMainWindow):
             return False
         if len(self._walkers) >= self.MAX_WALKERS:
             return False
-        w = WalkerItem(a.color, self._walk_path(a, b))
+        w = WalkerItem(a.color, self._walk_path(a, b), text)
         self.scene.addItem(w)
         self._walkers.append(w)
         self._away[from_name] = self._away.get(from_name, 0) + 1

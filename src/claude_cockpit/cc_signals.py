@@ -171,14 +171,21 @@ def messages_dir() -> Path:
     return data_dir() / "messages"
 
 
-def write_message(from_cwd: str, to_name: str) -> None:
-    """记一笔「谁给谁发了消息」。from 是发送方的 cwd(用来对成员),to 是**会话名**
-    (不是成员名——成员叫 fad-2、会话叫 fad-backend-2-f3,对应关系由 peers 给)。"""
+MSG_MAX = 140       # 气泡里最多显示这么多字;再长也画不下,没必要落盘
+
+
+def write_message(from_cwd: str, to_name: str, text: str = "") -> None:
+    """记一笔「谁给谁发了什么」。from 是发送方的 cwd(用来对员工),to 是**会话名**
+    (不是员工名——员工叫 fad-2、会话叫 fad-backend-2-f3,对应关系由 peers 给),
+    text 是消息正文(**写入时就截断**,见 MSG_MAX)。"""
     if not from_cwd or not to_name:
         return
     d = messages_dir()
     d.mkdir(parents=True, exist_ok=True)
-    payload = {"from_cwd": from_cwd, "to_name": to_name, "at": time.time()}
+    # 换行压成空格:气泡是自己排版的,原文里的换行会把它撑成一长条。
+    body = " ".join(str(text or "").split())[:MSG_MAX]
+    payload = {"from_cwd": from_cwd, "to_name": to_name, "text": body,
+               "at": time.time()}
     fd, tmp = tempfile.mkstemp(prefix=".cc-", suffix=".json", dir=str(d))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
