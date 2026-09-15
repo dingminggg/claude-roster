@@ -274,3 +274,27 @@ def test_walker_paints_its_bubble(app, office):
 def test_the_body_reaches_the_walker(app, office):
     office.send_walker("fad", "etl", "改好了")
     assert office._walkers[-1]._lines == ["改好了"]
+
+
+# ---------- 点工位时印出来的那句「总结」 ----------
+def test_office_say_sticky(office):
+    office.set_run_state("fad", "idle")
+    assert office.say("fad", "改完了。", sticky=True)
+    assert office.seats["fad"].is_sticky_saying()
+
+
+def test_office_say_needs_someone_at_the_desk(office):
+    """没上班的不说话(空椅子上冒气泡太灵异),空话也不说。"""
+    office.set_run_state("fad", "down")
+    assert not office.say("fad", "改完了。", sticky=True)
+    office.set_run_state("fad", "idle")
+    assert not office.say("fad", "", sticky=True)
+    assert not office.say("查无此人", "改完了。", sticky=True)
+
+
+def test_sticky_bubble_gets_more_lines(office):
+    """那是要读的一句话,不是路过的一眼——比送信那个气泡多给两行。"""
+    from claude_cockpit.office import bubble, seat_item
+    office.set_run_state("fad", "idle")
+    office.say("fad", "啊" * 300, sticky=True)
+    assert len(office.seats["fad"]._say) == seat_item.SAY_LINES > bubble.MAX_LINES

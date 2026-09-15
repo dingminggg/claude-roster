@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from claude_cockpit.config import Member
-from claude_cockpit.matching import match_pending, sessions_for_cwd
+from claude_cockpit.matching import (
+    latest_message_for_cwd, match_pending, sessions_for_cwd,
+)
 
 
 def _m(name, cwd):
@@ -65,3 +67,22 @@ def test_sessions_for_cwd_skips_bad_records(tmp_path):
         "not-a-dict",
     ]
     assert sessions_for_cwd(recs, a) == ["s1"]
+
+
+def test_latest_message_for_cwd_picks_the_newest():
+    """同一个 cwd 可能留着好几条会话的 turn-ended,点工位要冒的是最新那句。"""
+    recs = [
+        {"session_id": "a", "cwd": r"C:\proj\fad", "message": "旧的那句",
+         "at": "2026-09-15T01:00:00+00:00"},
+        {"session_id": "b", "cwd": r"C:\proj\fad", "message": "改完了。",
+         "at": "2026-09-15T02:00:00+00:00"},
+        {"session_id": "c", "cwd": r"C:\proj\etl", "message": "别人的",
+         "at": "2026-09-15T03:00:00+00:00"},
+    ]
+    assert latest_message_for_cwd(recs, r"C:/proj/fad") == "改完了。"
+
+
+def test_latest_message_for_cwd_empty_when_nothing_matches():
+    assert latest_message_for_cwd([], r"C:\proj\fad") == ""
+    assert latest_message_for_cwd([{"cwd": r"C:\other"}], r"C:\proj\fad") == ""
+    assert latest_message_for_cwd(["坏数据"], r"C:\proj\fad") == ""

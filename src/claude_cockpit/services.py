@@ -23,7 +23,7 @@ UP, DOWN, STUCK = "up", "down", "stuck"
 # 超时短于这个数,每个停掉的服务都会被误判成「无响应」(琥珀),永远看不到灭灯。
 # 代价由 probe_all 的并发兜住:一轮的耗时是最慢那个,不是几个相加。
 TIMEOUT = 2.5
-MAX_SERVICES = 12       # 机房里再多就不是「一眼看全」了
+MAX_SERVICES = 12       # 一台机柜上再多就不是「一眼看全」了
 
 
 @dataclass(frozen=True)

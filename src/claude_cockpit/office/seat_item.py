@@ -135,6 +135,12 @@ def _plate_text(name: str, length: float = PLATE_LEN) -> str:
     return _PLATE_FM.elidedText(name, Qt.TextElideMode.ElideRight, length)
 
 
+# 气泡尖落在哪儿(人头顶稍上方)。**paint 和 r_bubble 共用这两个数**——
+# 各写一份必然漂移,就成了「画在这儿、点在那儿」。
+SAY_TIP_X, SAY_TIP_Y = SEAT_W * 0.33, 18.0
+SAY_LINES = 5           # 钉住的气泡多给两行:那是要读的一句话,不是路过的一眼
+
+
 class SeatItem(QGraphicsObject):
     """一个工位。QGraphicsObject(而非 QGraphicsItem)是为了能发信号。"""
 
@@ -171,6 +177,7 @@ class SeatItem(QGraphicsObject):
         self._services: list = []
         self._svc_states: dict[str, str] = {}
         self._say: list[str] = []           # 正在说的那句话(折好行的)
+        self._say_sticky = False            # 钉住的气泡:不自己收,点一下才关
         self._say_timer = QTimer(self)      # 自带表:说完自己收回去
         self._say_timer.setSingleShot(True)
         self._say_timer.timeout.connect(lambda: self.say(""))
@@ -228,21 +235,30 @@ class SeatItem(QGraphicsObject):
     def rack_all_green(self) -> bool:
         return rack_item.all_green(self._services, self._svc_states)
 
-    def say(self, text: str, ms: int = 0) -> None:
+    def say(self, text: str, ms: int = 0, sticky: bool = False,
+            lines: int = bubble.MAX_LINES) -> None:
         """在工位上冒个气泡说一句(`text` 为空 = 收回气泡)。
 
         **停多久按字数算**——一句「都正常」和一段点名三个服务的话,给同样的时间
         要么干等、要么根本没读完(同送信小人那条)。
+
+        `sticky=True` **不自己收**:那是点工位时印出来的「这一轮说了什么」,和它
+        并排的语音要念好一会儿,自动消失的话人抬头就没了;点一下气泡才关(见
+        `r_bubble` / `hit`)。运维报平安那种是路过一眼的事,仍走计时那条。
         """
         self.prepareGeometryChange()        # 气泡比工位框高,包围盒要跟着变
-        self._say = bubble.wrap(text)
+        self._say = bubble.wrap(text, lines=lines)
+        self._say_sticky = bool(sticky) and bool(self._say)
         self._say_timer.stop()
-        if self._say:
+        if self._say and not self._say_sticky:
             self._say_timer.start(ms or min(6000, 1600 + len(text) * 90))
         self.update()
 
     def is_saying(self) -> bool:
         return bool(self._say)
+
+    def is_sticky_saying(self) -> bool:
+        return bool(self._say) and self._say_sticky
 
     def set_message(self, on: bool) -> None:
         self._msg = bool(on)
@@ -324,7 +340,9 @@ class SeatItem(QGraphicsObject):
         """悬停提示按落点给不同的信息:画面上不写状态和会话标题(那会把白模
         场景堆满字),但悬停要查得到——鼠标停在人身上问「他在干嘛」,
         停在文件堆上问「这是哪条会话」。"""
-        if where == "rack":
+        if where == "bubble":
+            tip = "点一下关掉"
+        elif where == "rack":
             tip = rack_item.tooltip(self._services, self._svc_states)
         elif where == "person":
             tip = f"{self.name} · {self.status_text()}"
@@ -353,10 +371,16 @@ class SeatItem(QGraphicsObject):
 
     # ---------- 命中区 ----------
     def boundingRect(self) -> QRectF:
-        """工位框;正在说话时往上让出气泡那一块(不让的话气泡会被裁掉半截)。"""
+        """工位框;正在说话时**把气泡整块并进来**(上边和两侧都要让)。
+
+        **只让上边不够**:气泡是按正文算宽的,尖尖在 `SAY_TIP_X`(工位左三分之一
+        处),满宽那种往左要伸出工位框外 18px——超出包围盒的那截 Qt 不给重画区域,
+        画面上就是「气泡左边少一块」(送信那个小人早踩过同一条,见
+        `walker_item.boundingRect`)。所以按气泡自己的矩形取并集,别写死。
+        """
         r = QRectF(0, 0, SEAT_W, SEAT_H)
         if self._say:
-            r.setTop(-bubble.height(self._say) - 6)
+            r = r.united(self.r_bubble().adjusted(-2, -6, 2, bubble.TAIL_H + 2))
         return r
 
     # 三块命中区的数值 = 对应家具在 _pt 投影下的包围盒。改了家具的房间坐标,
@@ -404,16 +428,34 @@ class SeatItem(QGraphicsObject):
         return QRectF(min(xs) - 1, min(ys) - 1,
                       max(xs) - min(xs) + 2, max(ys) - min(ys) + 2)
 
+    def r_bubble(self) -> QRectF:
+        """头顶那个气泡(没在说话就是个空矩形,`contains` 恒 False)。
+
+        钉住的气泡要点一下才关,所以它得是一块命中区。数值由气泡自己的尺寸算出来
+        (`bubble.size`),和 `paint` 共用 `SAY_TIP_*` 那两个常量——写死的话长气泡
+        点不着上半截。它整个在工位框上方(底边 y=12,最靠上的 `r_speaker` 从 16
+        起),所以和桌上那几块天然不叠。
+        """
+        if not self._say:
+            return QRectF()     # 空矩形:contains 恒 False，也不会撑大包围盒
+        bw, bh = bubble.size(self._say)
+        bottom = SAY_TIP_Y - bubble.TAIL_H
+        return QRectF(SAY_TIP_X - bw / 2, bottom - bh, bw, bh)
+
     def r_rack(self) -> QRectF:
         """桌上那台小机柜(只有运维那张工位有):右键它复制服务地址。"""
         return rack_item.hit_rect()
 
     def hit(self, pos: QPointF) -> str:
-        """局部坐标 → "speaker" / "person" / "rack" / "files" / "phone" / "seat"。
+        """局部坐标 → "bubble" / "speaker" / "person" / "rack" / "files" /
+        "phone" / "seat"。
 
         分区是有语义的:点人 = 管他上下班,点文件 = 管他的会话历史。
         paint 和这里共用同一份 r_*,两处各写一遍必然漂移。
+        气泡画在最上面,所以也最先判——它盖着谁,点的就该是它。
         """
+        if self.is_sticky_saying() and self.r_bubble().contains(pos):
+            return "bubble"
         if self.is_up() and self._speaking and self.r_speaker().contains(pos):
             return "speaker"
         if self.r_person().contains(pos):
@@ -747,7 +789,7 @@ class SeatItem(QGraphicsObject):
             p.restore()                             # 收掉上面那层给空椅子的淡化
 
         if self._say:       # 气泡:压在所有东西之上,尖尖落在人头顶稍上方
-            bubble.draw(p, self._say, QPointF(SEAT_W * 0.33, 18.0))
+            bubble.draw(p, self._say, QPointF(SAY_TIP_X, SAY_TIP_Y))
 
 
 
@@ -770,6 +812,10 @@ class SeatItem(QGraphicsObject):
             e.ignore()
             return
         where = self.hit(e.pos())       # 判一次就够,别每支各调一遍 hit
+        if where == "bubble":
+            # 点气泡**只收气泡**:它是钉住的,这一下就是「我看完了」。
+            self.say("")
+            e.accept(); return
         if where == "speaker":
             self.speaker_clicked.emit(self.name)
             e.accept(); return

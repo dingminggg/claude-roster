@@ -18,7 +18,9 @@ from . import (
 )
 from .config import Member, load_config, save_config, validate_member
 from .launcher import launch, window_title
-from .matching import match_pending, norm_path, sessions_for_cwd
+from .matching import (
+    latest_message_for_cwd, match_pending, norm_path, sessions_for_cwd,
+)
 from .office import OfficeWindow, UP_STATES
 from .assets import ICON_PATH
 from .tray_popup import TrayPopup
@@ -53,7 +55,7 @@ def _config_path() -> Path:
 
 
 def _services_path() -> Path:
-    """机房那份服务清单。不存在也没关系——services.load 会退回内置的三个。"""
+    """运维那份服务清单。不存在也没关系——services.load 会退回内置的三个。"""
     return _root_file("services.yaml")
 
 
@@ -295,7 +297,9 @@ def main() -> int:
 
     def on_row_click(name: str) -> None:
         """点工位:已运行 → 把它的控制台**置前**(不最大化、也不动别人)
-        + 标记已读(清 turn-ended)。标记已读会把这个员工从托盘闪烁里摘掉;
+        + 标记已读(清 turn-ended)+ 朗读这一轮的回复,**同时把开头那句结论印在
+        工位的气泡上**(语音是线性的,要听完才知道说了什么;那句话钉在那儿,
+        点一下气泡才关)。标记已读会把这个员工从托盘闪烁里摘掉;
         多个待处理时逐个点掉、全点完才停闪。未运行/启动中无反应。
 
         **别再最大化、也别去最小化其他控制台**:那是替用户摆桌面——他自己排好的
@@ -305,11 +309,18 @@ def main() -> int:
         if h is not None:
             card_read.add(name)             # 标记已读:✉ 停闪 + 不再计入托盘闪烁(权限 pending 不删文件)
             winman.bring_to_front(h)
+            # **先把这一轮的第一句话取出来,再 _dismiss**:那句话就存在 turn-ended
+            # 那条记录里,清完就没了(踩过的顺序坑)。
+            m = by_name.get(name)
+            head = (latest_message_for_cwd(cc_signals.read_turn_ended_full(), m.cwd)
+                    if m is not None else "")
             _dismiss(name)
             _refresh_states()               # 立刻让信封消失,不等下一个 tick(~1s)
-            m = by_name.get(name)           # 激活即朗读该会话最新一条回复(存在才播)
             if m is not None:
-                speak_on_activate(m.cwd)
+                speak_on_activate(m.cwd)    # 激活即朗读该会话最新一条回复(存在才播)
+                # 语音是线性的、要听完才知道说了什么,所以同时把开头那句结论印在
+                # 工位的气泡上。**钉住不自动消失**——点一下气泡才关。
+                panel.say(name, head, sticky=True)
 
     def on_start(name: str, session_id=None) -> None:
         """面板里点「启动」→「确定」后发来 (name, session_id):拉起控制台。
@@ -634,7 +645,7 @@ def main() -> int:
     blink_timer.timeout.connect(_blink_tick)
     blink_timer.start(550)
 
-    # 机房:5s 探一轮本地服务。**不跟着 1s 那条主 tick 走**——服务起停不是秒级的事,
+    # 本地服务:5s 探一轮。**不跟着 1s 那条主 tick 走**——服务起停不是秒级的事,
     # 每秒探一遍纯属白烧。探测本身在线程池里跑,结果回主线程刷机柜。
     probing = {"on": False}
 

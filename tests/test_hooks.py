@@ -37,6 +37,23 @@ def test_turn_ended_writes_turn_and_clears_pending(monkeypatch):
     assert cleared == [(("s1",), {})]   # 答完一轮顺手清掉权限 pending
 
 
+def test_turn_ended_carries_the_first_sentence(monkeypatch):
+    """信号里顺手带上这一轮的第一句话——点工位时它就是气泡里印的那句。"""
+    turns = _recorder(monkeypatch, "write_turn_ended")
+    _recorder(monkeypatch, "clear_pending")
+    turn_ended_hook.handle({"session_id": "s1", "cwd": "C:/x",
+                            "last_assistant_message": "改完了。还补了两条用例。"})
+    assert turns[0][0] == ("s1", "改完了。", "C:/x")
+
+
+def test_turn_ended_without_a_message_writes_empty(monkeypatch):
+    """没正文就写空串:空串 = 不冒气泡,不是「冒个空框」。"""
+    turns = _recorder(monkeypatch, "write_turn_ended")
+    _recorder(monkeypatch, "clear_pending")
+    turn_ended_hook.handle({"session_id": "s1", "cwd": "C:/x"})
+    assert turns[0][0] == ("s1", "", "C:/x")
+
+
 def test_clear_clears_turn_and_pending(monkeypatch):
     cleared_turn = _recorder(monkeypatch, "clear_turn_ended")
     cleared_pending = _recorder(monkeypatch, "clear_pending")

@@ -26,6 +26,7 @@ from .history_popup import HistoryPopup
 # 直接 import 函数:set_sessions 的形参就叫 sessions,import 模块会被它遮住
 from ..sessions import issue_tag
 from .dept_area import DeptAreaItem
+from . import bubble, seat_item
 from .seat_item import SeatItem
 from .walker_item import WalkerItem
 from . import theme
@@ -107,8 +108,8 @@ class OfficeWindow(QMainWindow):
     copy_text_requested = Signal(str)    # 把一段文本塞进剪贴板(机柜的连接地址)
 
     def __init__(self, members, services=()):
-        """`services` 是本地服务清单(机房里的机柜)。**默认为空**:构造函数里不读盘
-        不探活,真正的清单由 main 传进来——否则一建窗口就凭空多出一块机房区,
+        """`services` 是本地服务清单(运维桌上那台机柜)。**默认为空**:构造函数里不读盘
+        不探活,真正的清单由 main 传进来——否则一建窗口就凭空多出一块运维部门区,
         测试和离屏自检都得跟着迁就。"""
         super().__init__()
         self.setWindowTitle("办公室")
@@ -165,8 +166,9 @@ class OfficeWindow(QMainWindow):
         parsed = layout_mod.parse(raw)
         self._extra_depts |= {d for d in parsed.depts}
         parsed.depts = sorted(self._extra_depts | set(parsed.depts))
-        # 机柜按「住在机房的占位成员」参与布局:地毯、槽位、吸附、存盘全走同一套,
-        # 机房不需要自己的布局账本(键带 svc: 前缀,和员工名撞不上)。
+        # 机柜不参与布局:它是运维**桌上的一样家具**,不占格子也不存坐标。
+        # (老 settings.json 里可能还躺着 `svc:` 开头的键——那是它当独立图元那阵子
+        # 留下的,`layout.ensure` 会丢掉。)
         lay = layout_mod.ensure(parsed, self._members)
         self._lay = lay
         for dept, (x, y, w, h) in lay.areas.items():
@@ -218,7 +220,7 @@ class OfficeWindow(QMainWindow):
         if seat is not None:
             landed = self._area_at(seat)
             here = seat.parentItem()
-            if name == OPS_NAME:        # 运维的部门锁死:拖到哪儿都还是机房的人
+            if name == OPS_NAME:        # 运维的部门锁死:拖到哪儿都还是运维部门的人
                 landed = None
             if landed and self.areas.get(landed) is not here:
                 area = self.areas[landed]
@@ -314,7 +316,7 @@ class OfficeWindow(QMainWindow):
         if center is not None:
             self._canvas.centerOn(center)
 
-    # ---------- 机房 ----------
+    # ---------- 运维桌上那台机柜 ----------
     def set_service_states(self, states: dict) -> None:
         """喂一整份服务状态(由 main 的后台探测回来)→ 运维桌上那台机柜的柜灯。
 
@@ -330,6 +332,21 @@ class OfficeWindow(QMainWindow):
         after = ops.service_report()
         if after != before and ops.is_up():     # 没上班就不说话(空椅子上冒气泡太灵异)
             ops.say(after)
+
+    # ---------- 工位上说一句 ----------
+    def say(self, name: str, text: str, sticky: bool = False) -> bool:
+        """让某个员工在工位上冒个气泡说一句(和会话间发消息那个气泡同一份画法)。
+
+        `sticky=True` 的不自己收、点一下才关——点工位会朗读这一轮的回复,同时把
+        那句结论印出来,自动消失的话人一抬头就没了。没上班的不说话(空椅子上冒
+        气泡太灵异),说不出来就回 False,调用方不用管。
+        """
+        seat = self.seats.get(name)
+        if seat is None or not text or not seat.is_up():
+            return False
+        seat.say(text, sticky=sticky,
+                 lines=seat_item.SAY_LINES if sticky else bubble.MAX_LINES)
+        return True
 
     def set_run_state(self, name: str, state: str) -> None:
         seat = self.seats.get(name)
@@ -672,12 +689,12 @@ class OfficeWindow(QMainWindow):
         edit = menu.addAction("编辑")
         rm = menu.addAction("删除")
         if name == OPS_NAME:
-            # 运维是机房的**固定岗位**,不是你临时拉的人:面板里不给改也不给删
+            # 运维是运维部门的**固定岗位**,不是你临时拉的人:面板里不给改也不给删
             # (要换目录就去 agents.yaml 改那一行)。**置灰而不是隐藏**——隐藏了
             # 用户会以为功能没了,同「复制会话地址」那条的口径。
             for act in (edit, rm):
                 act.setEnabled(False)
-                act.setToolTip("运维是机房的固定岗位,改 agents.yaml 里那一行")
+                act.setToolTip("运维是固定岗位,改 agents.yaml 里那一行")
         else:
             edit.triggered.connect(lambda: self.edit_requested.emit(name))
             rm.triggered.connect(lambda: self.delete_requested.emit(name))

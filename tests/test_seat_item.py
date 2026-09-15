@@ -345,3 +345,74 @@ def test_phone_paints_in_every_state(seat):
         p = QPainter(img)
         seat.paint(p, None, None)
         p.end()
+
+
+# ---------- 钉住的气泡(点工位时印出来的那句「总结」) ----------
+def test_plain_say_expires_on_its_own(seat):
+    seat.set_run_state("idle")
+    seat.say("都正常")
+    assert seat.is_saying() and not seat.is_sticky_saying()
+    assert seat._say_timer.isActive()
+
+
+def test_sticky_say_never_expires(seat):
+    """语音要念好一会儿,气泡自己收掉的话人一抬头就没了。"""
+    seat.set_run_state("idle")
+    seat.say("改完了。", sticky=True)
+    assert seat.is_sticky_saying()
+    assert not seat._say_timer.isActive()
+
+
+def test_sticky_bubble_is_a_hit_region_and_click_closes_it(seat):
+    seat.set_run_state("idle")
+    seat.say("改完了。", sticky=True)
+    assert seat.hit(seat.r_bubble().center()) == "bubble"
+    raised = []
+    seat.clicked.connect(raised.append)
+    seat.mousePressEvent(_press_at(seat.r_bubble().center()))
+    assert not seat.is_saying()
+    assert raised == []         # 点气泡只收气泡,不顺带把控制台弹到眼前
+
+
+def test_plain_bubble_is_not_clickable(seat):
+    """会自己收的那种不抢点击:点下去仍是「点工位」。"""
+    seat.set_run_state("idle")
+    seat.say("都正常")
+    assert seat.hit(seat.r_bubble().center()) != "bubble"
+
+
+def test_no_bubble_no_hit_region(seat):
+    assert seat.r_bubble().isEmpty()
+    assert not seat.r_bubble().contains(QPointF(0, 0))
+
+
+def test_bubble_hit_rect_disjoint_from_the_desk(seat):
+    """气泡整个在工位框上方,和桌上那几块命中区不能叠(叠了就串台)。"""
+    from claude_cockpit.services import Service
+    seat.set_history(3, 1)
+    seat.set_session_count(3)
+    seat.set_run_state("idle")
+    seat.say("啊" * 200, sticky=True)        # 最长的那种气泡
+    b = seat.r_bubble()
+    for other in (seat.r_person(), seat.r_speaker(), seat.r_files(),
+                  seat.r_phone()):
+        assert not b.intersects(other)
+    seat.set_services([Service("mysql", 3306)])
+    assert not b.intersects(seat.r_rack())
+
+
+def test_sticky_bubble_grows_the_bounding_rect(seat):
+    seat.set_run_state("idle")
+    plain = seat.boundingRect()
+    seat.say("啊" * 200, sticky=True)
+    assert seat.boundingRect().top() < plain.top()
+
+
+def test_bounding_rect_covers_the_whole_bubble(seat):
+    """包围盒要把气泡整块含进去——**两侧也要**。满宽的气泡往左伸出工位框外,
+    只让上边的话 Qt 不给那截重画区域,画面上就是「气泡左边少一块」。"""
+    seat.set_run_state("idle")
+    seat.say("啊" * 200, sticky=True)
+    b = seat.r_bubble()
+    assert b.left() < 0                     # 确实伸到工位框外了,这条才有意义
+    assert seat.boundingRect().contains(b)

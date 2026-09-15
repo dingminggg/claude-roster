@@ -1,4 +1,4 @@
-"""机房:运维桌上那台小机柜(本地服务的状态灯)+ 运维那个固定岗位。"""
+"""运维:他桌上那台小机柜(本地服务的状态灯)+ 运维那个固定岗位。"""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -165,11 +165,21 @@ def test_ops_is_a_normal_employee_with_a_normal_seat(win):
 
 
 def test_ops_department_is_locked(app, tmp_path):
-    """名字和部门锁死:yaml 里写别的部门也会被扳回机房。"""
+    """名字和部门锁死:yaml 里写别的部门也会被扳回运维那块部门区。"""
     from claude_cockpit.config import load_config
     p = tmp_path / "agents.yaml"
-    p.write_text("agents:\n  - {name: ops, cwd: '.', dept: 后勤}\n", encoding="utf-8")
+    p.write_text(f"agents:\n  - {{name: {OPS_NAME}, cwd: '.', dept: 后勤}}\n",
+                 encoding="utf-8")
     assert load_config(p)[0].dept == OPS_DEPT
+
+
+def test_only_the_fixed_post_is_locked(app, tmp_path):
+    """别人的部门谁也不许扳——`ops` 现在是运营那位,曾经是这个固定岗位的名字,
+    两处对不上就会把他硬拽进运维、还不给编辑(踩过)。"""
+    from claude_cockpit.config import load_config
+    p = tmp_path / "agents.yaml"
+    p.write_text("agents:\n  - {name: ops, cwd: '.', dept: 运营}\n", encoding="utf-8")
+    assert load_config(p)[0].dept == "运营"
 
 
 def test_ops_cannot_be_edited_or_deleted_from_the_panel(win):

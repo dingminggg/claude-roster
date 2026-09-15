@@ -21,7 +21,7 @@ AREA_COLS = 3                   # 新地毯按几列铺:再宽一屏就装不下
 AREA_ORIGIN = (10.0, 30.0)      # 第一块地毯的落点
 DEFAULT_WINDOW = (900, 620)
 UNASSIGNED = "未分配"           # 没填 dept 的员工归到这块部门区
-SERVER_ROOM = "机房"           # 运维那个固定岗位所在的部门区(见 config.OPS_DEPT)
+SERVER_ROOM = "运维"           # 运维那个固定岗位所在的部门区(见 config.OPS_DEPT)
 # 曾经用过的前缀:机柜当过独立图元、按「占位成员」参与布局。现在机柜是运维**桌上
 # 的一样家具**,不占格子也不存坐标;这个常量只留给老 settings.json —— 里面可能还
 # 躺着 svc:rack 之类的键,认出来好丢掉(layout.ensure 本来就会丢,这里只是留个名)。

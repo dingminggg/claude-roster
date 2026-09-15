@@ -1,6 +1,9 @@
 """Stop hook:Claude 答完一轮 → 记一笔「该你看了」到 turn-ended/,并顺手清掉该会话的
 权限 pending(答完即不再等你确认)。
 
+信号里**顺手带上这一轮的第一句话**(`summary.first_sentence`):点工位时它会印在
+工位的气泡上——语音是线性的,要听完才知道说了什么,那句结论得能一眼看到。
+
 被 Claude Code 以 `python -m claude_cockpit.hooks.turn_ended` 拉起,hook 负载
 JSON 从 stdin 读入。异常一律吞掉返回 0,绝不阻断 Claude。
 """
@@ -12,14 +15,15 @@ import traceback
 
 from ._payload import read_payload
 
-from claude_cockpit import cc_signals
+from claude_cockpit import cc_signals, summary
 
 
 def handle(payload: dict) -> None:
     session_id = payload.get("session_id")
     cwd = payload.get("cwd", "") or ""
     if session_id:
-        cc_signals.write_turn_ended(session_id, "", cwd)
+        head = summary.first_sentence(payload.get("last_assistant_message") or "")
+        cc_signals.write_turn_ended(session_id, head, cwd)
         cc_signals.clear_pending(session_id)    # 答完即不再等权限确认
 
 
